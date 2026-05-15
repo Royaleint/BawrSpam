@@ -1,0 +1,35 @@
+# Private dev workspace (nested git repo, separately tracked)
+BawrSpam_Dev/
+
+# Agent / tool layer (Claude Code, Codex)
+.claude/
+.codex/
+AGENTS.md
+
+# WoW packager working files
+.release/
+.pkgmeta-cache/
+
+# Libraries (fetched by packager via .pkgmeta externals on release)
+Libs/
+
+# Build artifacts
+*.zip
+*.tar.gz
+
+# Windows junk
+Thumbs.db
+nul
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets
+.env
+.env.local
+*.key
