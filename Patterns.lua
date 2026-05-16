@@ -20,6 +20,8 @@ local function _decode(encoded, entryIndex, seedLow, seedHigh)
   local bytes = {}
   for j = 1, #encoded do
     local b = string.byte(encoded, j)
+    -- NOTE: this mask formula MUST match build_patterns.lua's encoder exactly.
+    -- A drift here would silently decode all patterns to garbage with no error.
     local mask = (seedLow + j + seedHigh * (entryIndex + 1)) % 256
     bytes[j] = string.char(_bxor(b, mask))
   end
@@ -33,6 +35,7 @@ end
 
 function Patterns:LoadOnInit()
   if not _data then return end
+  assert(_data.version == 1, "PatternData version mismatch: expected 1, got " .. tostring(_data.version))
   for i, entry in ipairs(_data.entries) do
     _compiled[i] = {
       category = entry.c,
