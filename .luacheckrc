@@ -1,4 +1,4 @@
-std = "none"
+std = "lua51"
 max_line_length = false
 
 globals = {
@@ -16,14 +16,12 @@ globals = {
 }
 
 read_globals = {
-    -- Lua builtins
-    "_G", "next",
-    "pairs", "ipairs", "type", "select", "unpack",
-    "tonumber", "tostring", "print", "format",
-    "tinsert", "tremove", "wipe", "strsplit",
-    "time", "date", "math", "string", "table",
-    "error", "pcall", "xpcall", "rawget", "rawset", "setmetatable", "getmetatable",
-    "assert",
+    -- WoW aliases for stdlib (not in Lua 5.1 std as bare globals)
+    "tinsert", "tremove", "wipe", "strsplit", "format",
+    "time", "date",
+
+    -- WoW bitlib (LuaJIT/5.2+ bit library exposed via WoW runtime)
+    "bit",
 
     -- WoW frames/UI
     "BackdropTemplateMixin",
@@ -67,16 +65,17 @@ read_globals = {
     "geterrorhandler",
     "GetScreenWidth", "GetScreenHeight",
 
-    -- WoW bitlib (Lua 5.1)
-    "bit",
-
     -- Ace3 / Libraries
     "LibStub",
 }
 
--- Vendored libraries are not subject to project luacheck rules.
+-- Exclude vendored libraries (third-party code; not subject to project rules)
+-- and the private dev repo (its own rules + dev-only globals live there).
 exclude_files = {
-    "Libs/**/*.lua",
+    "BawrSpam_Dev/**",
+    "Libs/**",
 }
 
-ignore = {"21[23]"}  -- callback / Ace3 patterns
+ignore = {
+    "21[23]",  -- callback/test helper patterns with intentionally unused args
+}
