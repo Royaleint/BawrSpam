@@ -11,6 +11,10 @@ function Cleanse._ScanCodepoints(text, transformFn)
 
   local out = {}
   local i, n = 1, #text
+  local function isContinuation(byte)
+    return byte and byte >= 0x80 and byte <= 0xBF
+  end
+
   while i <= n do
     local b1 = string.byte(text, i)
     local cp, width
@@ -19,20 +23,38 @@ function Cleanse._ScanCodepoints(text, transformFn)
     elseif b1 < 0xC0 then
       cp, width = 0xFFFD, 1  -- stray continuation byte; emit replacement, advance one
     elseif b1 < 0xE0 then
-      local b2 = string.byte(text, i + 1) or 0
-      cp = ((b1 - 0xC0) * 64) + (b2 - 0x80)
-      width = 2
+      local b2 = string.byte(text, i + 1)
+      if b1 >= 0xC2 and isContinuation(b2) then
+        cp = ((b1 - 0xC0) * 64) + (b2 - 0x80)
+        width = 2
+      else
+        cp, width = 0xFFFD, 1
+      end
     elseif b1 < 0xF0 then
-      local b2 = string.byte(text, i + 1) or 0
-      local b3 = string.byte(text, i + 2) or 0
-      cp = ((b1 - 0xE0) * 4096) + ((b2 - 0x80) * 64) + (b3 - 0x80)
-      width = 3
+      local b2 = string.byte(text, i + 1)
+      local b3 = string.byte(text, i + 2)
+      if isContinuation(b2) and isContinuation(b3)
+          and not (b1 == 0xE0 and b2 < 0xA0)
+          and not (b1 == 0xED and b2 > 0x9F) then
+        cp = ((b1 - 0xE0) * 4096) + ((b2 - 0x80) * 64) + (b3 - 0x80)
+        width = 3
+      else
+        cp, width = 0xFFFD, 1
+      end
+    elseif b1 < 0xF5 then
+      local b2 = string.byte(text, i + 1)
+      local b3 = string.byte(text, i + 2)
+      local b4 = string.byte(text, i + 3)
+      if isContinuation(b2) and isContinuation(b3) and isContinuation(b4)
+          and not (b1 == 0xF0 and b2 < 0x90)
+          and not (b1 == 0xF4 and b2 > 0x8F) then
+        cp = ((b1 - 0xF0) * 262144) + ((b2 - 0x80) * 4096) + ((b3 - 0x80) * 64) + (b4 - 0x80)
+        width = 4
+      else
+        cp, width = 0xFFFD, 1
+      end
     else
-      local b2 = string.byte(text, i + 1) or 0
-      local b3 = string.byte(text, i + 2) or 0
-      local b4 = string.byte(text, i + 3) or 0
-      cp = ((b1 - 0xF0) * 262144) + ((b2 - 0x80) * 4096) + ((b3 - 0x80) * 64) + (b4 - 0x80)
-      width = 4
+      cp, width = 0xFFFD, 1
     end
 
     local transformed = transformFn(cp)
