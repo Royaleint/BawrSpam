@@ -10,8 +10,8 @@ AGENTS.md
 .release/
 .pkgmeta-cache/
 
-# Libraries (fetched by packager via .pkgmeta externals on release)
-Libs/
+# Libraries: vendored directly in-repo (no .pkgmeta externals — manual vendor pattern)
+# Libs/ is tracked. Do not re-add this ignore.
 
 # Build artifacts
 *.zip
