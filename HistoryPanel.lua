@@ -771,7 +771,7 @@ RefreshList = function()
   if not listPane or not listPane.scroll then return end
   local scroll = listPane.scroll
 
-  currentEntriesSnapshot = GetEntries()
+  currentEntriesSnapshot = GetEntries() or {}
   local entries = ApplyFilterAndSort(currentEntriesSnapshot)
   local visibleRows = VisibleRowCount(scroll)
   FauxScrollFrame_Update(scroll, #entries, visibleRows, LIST_ROW_HEIGHT)
