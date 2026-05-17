@@ -77,6 +77,7 @@ read_globals = {
     "UnitInParty",
     "UnitInRaid",
     "geterrorhandler",
+    "GetCursorPosition",
     "GetScreenWidth", "GetScreenHeight",
     "PLAYER_REPORT_TYPE_SPAM",
 
