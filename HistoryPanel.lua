@@ -813,39 +813,13 @@ end
 
 RefreshList = function()
   if not listPane or not listPane.scroll then return end
-  local scroll = listPane.scroll
 
   local allEntries = GetEntries() or {}
   currentEntriesSnapshot = allEntries
-  local entries = ApplyFilterAndSort(allEntries) or {}
-  local visibleRows = VisibleRowCount(scroll)
-  -- 11th positional `alwaysShowScrollBar = true` keeps the ScrollFrame visible
-  -- when numItems <= numToDisplay. Blizzard's FauxScrollFrame_Update otherwise
-  -- calls frame:Hide() in that branch (SecureScrollTemplates.lua:167), which
-  -- also hides every row child — that was the list-empty bug.
-  FauxScrollFrame_Update(scroll, #entries, visibleRows, LIST_ROW_HEIGHT,
-    nil, nil, nil, nil, nil, nil, true)
-  local offset = FauxScrollFrame_GetOffset(scroll)
-
-  for i = 1, LIST_MAX_ROWS do
-    local row = scroll.rows[i]
-    if i > visibleRows then
-      row.entry = nil
-      row:Hide()
-    else
-      local entry = entries[i + offset]
-      if entry then
-        row.entry = entry
-        RenderRow(row, entry)
-        row.selection:SetShown(selectedEntryId == entry.id)
-        row:Show()
-      else
-        row.entry = nil
-        row:Hide()
-      end
-    end
-  end
-
+  local filtered = ApplyFilterAndSort(allEntries)
+  local provider = listPane.scroll:GetDataProvider()
+  provider:Flush()
+  provider:InsertTable(filtered)
   RefreshDetail()
   currentEntriesSnapshot = nil
 end
@@ -1392,7 +1366,7 @@ local function BuildFrame()
 
   frame:SetScript("OnSizeChanged", function()
     sizeDirty = true
-    if RefreshList then RefreshList() end
+    if listPane and listPane.scroll then listPane.scroll:FullUpdate() end
   end)
   frame:SetScript("OnHide", function()
     if sizeDirty then SaveSize() end
