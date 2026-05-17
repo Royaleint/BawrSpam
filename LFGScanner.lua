@@ -167,29 +167,30 @@ local function InstallRenderHooks()
   renderHooksInstalled = true
 end
 
-local function EnsureRenderSweepFrame()
-  if renderSweepFrame then
-    return renderSweepFrame
+local function RenderSweepOnUpdate(_self, elapsed)
+  if not renderHideEnabled then
+    return
   end
 
+  renderSweepElapsed = renderSweepElapsed + (tonumber(elapsed) or 0)
+  if renderSweepElapsed < RENDER_SWEEP_INTERVAL then
+    return
+  end
+
+  renderSweepElapsed = 0
+  SweepVisibleRows()
+end
+
+local function EnsureRenderSweepFrame()
   if type(CreateFrame) ~= "function" then
     return nil
   end
 
-  renderSweepFrame = CreateFrame("Frame")
-  renderSweepFrame:SetScript("OnUpdate", function(_self, elapsed)
-    if not renderHideEnabled then
-      return
-    end
+  if not renderSweepFrame then
+    renderSweepFrame = CreateFrame("Frame")
+  end
 
-    renderSweepElapsed = renderSweepElapsed + (tonumber(elapsed) or 0)
-    if renderSweepElapsed < RENDER_SWEEP_INTERVAL then
-      return
-    end
-
-    renderSweepElapsed = 0
-    SweepVisibleRows()
-  end)
+  renderSweepFrame:SetScript("OnUpdate", RenderSweepOnUpdate)
   return renderSweepFrame
 end
 
@@ -198,6 +199,9 @@ local function SetRenderHideEnabled(shouldEnable)
   if renderHideEnabled then
     InstallRenderHooks()
     EnsureRenderSweepFrame()
+  elseif renderSweepFrame then
+    renderSweepFrame:SetScript("OnUpdate", nil)
+    renderSweepElapsed = 0
   end
   SweepVisibleRows()
 end
