@@ -11,8 +11,12 @@ local MIN_PANEL_WIDTH      = 720
 local MIN_PANEL_HEIGHT     = 500
 
 local LIST_ROW_HEIGHT  = 26
-local LIST_PANE_WIDTH  = 300
 local SCROLLBAR_GUTTER = 22
+
+local MIN_LIST_PANE_WIDTH   = 240
+local MIN_DETAIL_PANE_WIDTH = 360
+local DEFAULT_LIST_PANE_WIDTH = 380
+local SPLITTER_WIDTH = 4
 
 local CATEGORY_COLORS = {
   RMT        = "c44",
@@ -143,6 +147,19 @@ local function GetSettings()
 	return NS.DB and NS.DB.GetSettings and NS.DB.GetSettings() or {}
 end
 
+local function GetStoredListPaneWidth()
+  local store = GetCharStore() or {}
+  local w = tonumber(store.listPaneWidth) or DEFAULT_LIST_PANE_WIDTH
+  if w < MIN_LIST_PANE_WIDTH then w = MIN_LIST_PANE_WIDTH end
+  return w
+end
+
+local function SaveListPaneWidth(width)
+  local store = GetCharStore()
+  if not store then return end
+  store.listPaneWidth = width
+end
+
 local function SavePosition()
   if not frame then return end
   local store = GetCharStore()
@@ -241,13 +258,15 @@ local function CreateResizeHandle(parent)
 end
 
 local function CreatePanes(parent)
+  local listWidth = GetStoredListPaneWidth()
+
   local list = CreateFrame("Frame", nil, parent)
-  list:SetPoint("TOPLEFT",    parent, "TOPLEFT",    6, -104)
+  list:SetPoint("TOPLEFT",    parent, "TOPLEFT",    6, -64)
   list:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 6,   40)
-  list:SetWidth(LIST_PANE_WIDTH)
+  list:SetWidth(listWidth)
 
   local detail = CreateFrame("Frame", nil, parent)
-  detail:SetPoint("TOPLEFT",     list,   "TOPRIGHT",     6,  0)
+  detail:SetPoint("TOPLEFT",     parent, "TOPLEFT",     6 + listWidth + SPLITTER_WIDTH + 4, -64)
   detail:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -6, 40)
 
   return list, detail
@@ -575,9 +594,12 @@ local function PerformRestore(entry)
   -- to "Restored" if they want a focused view.
   if filterState and filterState.outcome == "Blocked" then
     filterState.outcome = "All"
+    -- Modern WowStyle1DropdownTemplate reflects state via its getValue
+    -- closure; call GenerateMenu to refresh the visible label after we mutate
+    -- filterState.outcome externally. AceGUI's SetValue is no longer used.
     if frame and frame.filterStrip and frame.filterStrip.outcomeDD
-       and frame.filterStrip.outcomeDD.SetValue then
-      frame.filterStrip.outcomeDD:SetValue("All")
+       and frame.filterStrip.outcomeDD.GenerateMenu then
+      frame.filterStrip.outcomeDD:GenerateMenu()
     end
   end
   if RefreshList then RefreshList() end
@@ -862,7 +884,17 @@ end
 
 SelectEntry = function(id)
   selectedEntryId = id
-  RefreshList()
+  if RefreshDetail then RefreshDetail() end
+  -- Update the existing-selection visual on rendered rows without rebuilding
+  -- the data provider (which would reset scroll). The ScrollBox's
+  -- ForEachFrame iterates current visible rows.
+  if listPane and listPane.scroll and listPane.scroll.ForEachFrame then
+    listPane.scroll:ForEachFrame(function(rowFrame, entryData)
+      if rowFrame.selection then
+        rowFrame.selection:SetShown(selectedEntryId == entryData.id)
+      end
+    end)
+  end
 end
 
 local function InitListRow(button)
@@ -903,12 +935,14 @@ local function InitListRow(button)
 end
 
 local function CreateListPane()
-  -- Column-header strip at the very top of the list pane. Right anchor
-  -- subtracts SCROLLBAR_GUTTER so headers align with row column positions.
+  local FILTER_STRIP_HEIGHT = 54
+  -- listPane.filterStrip is created by CreateHeaderFilters; anchor below it.
+  -- Column-header strip below the filter strip. Right anchor subtracts
+  -- SCROLLBAR_GUTTER so headers align with row column positions.
   local header = CreateFrame("Frame", nil, listPane)
   header:SetHeight(18)
-  header:SetPoint("TOPLEFT",  listPane, "TOPLEFT",  0, 0)
-  header:SetPoint("TOPRIGHT", listPane, "TOPRIGHT", -SCROLLBAR_GUTTER, 0)
+  header:SetPoint("TOPLEFT",  listPane, "TOPLEFT",  0, -FILTER_STRIP_HEIGHT)
+  header:SetPoint("TOPRIGHT", listPane, "TOPRIGHT", -SCROLLBAR_GUTTER, -FILTER_STRIP_HEIGHT)
   listPane.columnHeader = header
 
   header.timeLabel = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -936,7 +970,7 @@ local function CreateListPane()
   header.scoreLabel:SetText("Score")
 
   local scrollBox = CreateFrame("Frame", nil, listPane, "WowScrollBoxList")
-  scrollBox:SetPoint("TOPLEFT",     listPane, "TOPLEFT",     0, -18)
+  scrollBox:SetPoint("TOPLEFT",     listPane, "TOPLEFT",     0, -(FILTER_STRIP_HEIGHT + 18))
   scrollBox:SetPoint("BOTTOMRIGHT", listPane, "BOTTOMRIGHT", -SCROLLBAR_GUTTER, 18)
 
   local scrollBar = CreateFrame("EventFrame", nil, listPane, "MinimalScrollBar")
@@ -1185,47 +1219,21 @@ local function BuildCategoryChips(strip)
   return x
 end
 
-local function BuildAceGUIDropdown(parent, values, labels, current, width, anchorX, label, onChange)
-  local AceGUI = LibStub and LibStub("AceGUI-3.0", true)
-  if not AceGUI then return nil end
-
-  local dd = AceGUI:Create("Dropdown")
-  if not dd then return nil end
-
-  local list = {}
-  for _, v in ipairs(values) do
-    list[v] = (labels and labels[v]) or v
+local function CreateModernDropdown(parent, labelText, values, labels, getValue, setValue)
+  local dd = CreateFrame("DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+  dd:SetSize(110, 22)
+  if dd.SetDefaultText then
+    dd:SetDefaultText(L(labelText))
   end
-  dd:SetList(list, values)
-  dd:SetValue(current)
-  dd:SetLabel(label or "")
-  dd:SetWidth(width)
-  dd.frame:SetParent(parent)
-  dd.frame:ClearAllPoints()
-  dd.frame:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", anchorX, 0)
-  dd.frame:Show()
-  dd:SetCallback("OnValueChanged", function(_, _, value) onChange(value) end)
-  return dd
-end
-
-local function BuildAceGUISortDropdown(parent, anchorX, onChange)
-  local AceGUI = LibStub and LibStub("AceGUI-3.0", true)
-  if not AceGUI then return nil end
-
-  local dd = AceGUI:Create("Dropdown")
-  if not dd then return nil end
-
-  local list = {}
-  for _, key in ipairs(SORT_VALUES) do list[key] = SORT_LABELS[key] end
-  dd:SetList(list, SORT_VALUES)
-  dd:SetValue(sortMode or "newest")
-  dd:SetLabel("Sort")
-  dd:SetWidth(120)
-  dd.frame:SetParent(parent)
-  dd.frame:ClearAllPoints()
-  dd.frame:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", anchorX, 0)
-  dd.frame:Show()
-  dd:SetCallback("OnValueChanged", function(_, _, value) onChange(value) end)
+  dd:SetupMenu(function(_, root)
+    root:CreateTitle(L(labelText))
+    for _, v in ipairs(values) do
+      local displayLabel = (labels and labels[v]) or v
+      root:CreateRadio(L(displayLabel),
+        function() return getValue() == v end,
+        function() setValue(v); dd:GenerateMenu() end)
+    end
+  end)
   return dd
 end
 
@@ -1249,19 +1257,18 @@ local function CreateSenderFilterChip()
 end
 
 UpdateSenderFilterChip = function()
+  -- BSP-008 Commit 4: chip show/hide only — listPane anchors are owned by
+  -- CreatePanes + CreateSplitter (width is user-resizable and persisted), so
+  -- this no longer re-anchors listPane the way it did before the restructure.
+  -- Chip placement vs. the in-listPane filter strip will be reworked in a
+  -- later commit; for now the chip remains visible/hideable as before.
   if not frame or not frame.senderChip or not listPane then return end
   local chip = frame.senderChip
   if filterState and filterState.senderFilter then
     chip.label:SetText("|cff58a0ffFiltering by:|r " .. FormatSender(filterState.senderFilter))
     chip:Show()
-    listPane:ClearAllPoints()
-    listPane:SetPoint("TOPLEFT",    frame, "TOPLEFT",    6, -122)
-    listPane:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 6,   40)
   else
     chip:Hide()
-    listPane:ClearAllPoints()
-    listPane:SetPoint("TOPLEFT",    frame, "TOPLEFT",    6, -104)
-    listPane:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 6,   40)
   end
 end
 
@@ -1328,53 +1335,118 @@ local function CreateTabStrip(parent)
 end
 
 local function CreateHeaderFilters()
-  -- Two-row filter strip: chips on top, labeled dropdowns + Refresh on bottom.
-  local strip = CreateFrame("Frame", nil, frame)
-  strip:SetHeight(60)
-  strip:SetPoint("TOPLEFT",  frame, "TOPLEFT",   8, -36)
-  strip:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -36)
-  frame.filterStrip = strip
+  local strip = CreateFrame("Frame", nil, listPane)
+  strip:SetHeight(54)
+  strip:SetPoint("TOPLEFT",  listPane, "TOPLEFT",  0, 0)
+  strip:SetPoint("TOPRIGHT", listPane, "TOPRIGHT", 0, 0)
+  listPane.filterStrip = strip
+  frame.filterStrip = strip -- preserved for legacy callers that reference frame.filterStrip
 
-  BuildCategoryChips(strip)
+  -- Row 1: category chips
+  local chipsRow = CreateFrame("Frame", nil, strip)
+  chipsRow:SetHeight(24)
+  chipsRow:SetPoint("TOPLEFT",  strip, "TOPLEFT",  4, -2)
+  chipsRow:SetPoint("TOPRIGHT", strip, "TOPRIGHT", -4, -2)
+  BuildCategoryChips(chipsRow)
 
-  local ddX = 0
-  strip.surfaceDD = BuildAceGUIDropdown(strip, SURFACE_VALUES, SURFACE_LABELS,
-    filterState.surface, 130, ddX, "Surface",
-    function(value)
-      filterState.surface = value
-      if RefreshList then RefreshList() end
-    end)
-  if strip.surfaceDD then ddX = ddX + 140 end
+  -- Row 2: dropdowns + Refresh
+  local ddRow = CreateFrame("Frame", nil, strip)
+  ddRow:SetHeight(24)
+  ddRow:SetPoint("TOPLEFT",  chipsRow, "BOTTOMLEFT",  0, -4)
+  ddRow:SetPoint("TOPRIGHT", chipsRow, "BOTTOMRIGHT", 0, -4)
 
-  strip.timeDD = BuildAceGUIDropdown(strip, TIME_WINDOW_VALUES, nil,
-    filterState.timeWindow, 110, ddX, "Time window",
-    function(value)
-      filterState.timeWindow = value
-      if RefreshList then RefreshList() end
-    end)
-  if strip.timeDD then ddX = ddX + 120 end
+  strip.surfaceDD = CreateModernDropdown(ddRow, "Surface", SURFACE_VALUES, SURFACE_LABELS,
+    function() return filterState.surface end,
+    function(v) filterState.surface = v; if RefreshList then RefreshList() end end)
+  strip.surfaceDD:SetPoint("LEFT", ddRow, "LEFT", 0, 0)
 
-  strip.outcomeDD = BuildAceGUIDropdown(strip, OUTCOME_VALUES, nil,
-    filterState.outcome, 100, ddX, "Outcome",
-    function(value)
-      filterState.outcome = value
-      if RefreshList then RefreshList() end
-    end)
-  if strip.outcomeDD then ddX = ddX + 110 end
+  strip.timeDD = CreateModernDropdown(ddRow, "Time", TIME_WINDOW_VALUES, nil,
+    function() return filterState.timeWindow end,
+    function(v) filterState.timeWindow = v; if RefreshList then RefreshList() end end)
+  strip.timeDD:SetPoint("LEFT", strip.surfaceDD, "RIGHT", 4, 0)
 
-  strip.sortDD = BuildAceGUISortDropdown(strip, ddX, function(value)
-    sortMode = value
-    if RefreshList then RefreshList() end
-  end)
+  strip.outcomeDD = CreateModernDropdown(ddRow, "Outcome", OUTCOME_VALUES, nil,
+    function() return filterState.outcome end,
+    function(v) filterState.outcome = v; if RefreshList then RefreshList() end end)
+  strip.outcomeDD:SetPoint("LEFT", strip.timeDD, "RIGHT", 4, 0)
 
-  local refresh = CreateFrame("Button", nil, strip, "UIPanelButtonTemplate")
-  refresh:SetSize(70, 22)
-  refresh:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", 0, 0)
-  refresh:SetText("Refresh")
+  strip.sortDD = CreateModernDropdown(ddRow, "Sort", SORT_VALUES, SORT_LABELS,
+    function() return sortMode end,
+    function(v) sortMode = v; if RefreshList then RefreshList() end end)
+  strip.sortDD:SetPoint("LEFT", strip.outcomeDD, "RIGHT", 4, 0)
+
+  local refresh = CreateFrame("Button", nil, ddRow, "UIPanelButtonTemplate")
+  refresh:SetSize(60, 22)
+  refresh:SetPoint("RIGHT", ddRow, "RIGHT", 0, 0)
+  refresh:SetText(L("Refresh"))
   refresh:SetScript("OnClick", function()
     if RefreshList then RefreshList() end
   end)
   strip.refresh = refresh
+end
+
+local function ClampPanes(parent)
+  if not listPane or not detailPane or not parent then return end
+  local parentWidth = parent:GetWidth()
+  if not parentWidth or parentWidth <= 0 then return end
+  local maxList = parentWidth - SPLITTER_WIDTH - MIN_DETAIL_PANE_WIDTH - 16
+  -- 16 = left margin 6 + post-splitter gap 4 + right margin 6
+  local currentList = listPane:GetWidth()
+  local clamped = currentList
+  if clamped < MIN_LIST_PANE_WIDTH then clamped = MIN_LIST_PANE_WIDTH end
+  if clamped > maxList then clamped = maxList end
+  if clamped < MIN_LIST_PANE_WIDTH then clamped = MIN_LIST_PANE_WIDTH end
+  if clamped ~= currentList then
+    listPane:SetWidth(clamped)
+  end
+  detailPane:ClearAllPoints()
+  detailPane:SetPoint("TOPLEFT",     parent, "TOPLEFT",     6 + clamped + SPLITTER_WIDTH + 4, -64)
+  detailPane:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -6, 40)
+end
+
+local function CreateSplitter(parent)
+  local splitter = CreateFrame("Button", nil, parent)
+  splitter:SetWidth(SPLITTER_WIDTH)
+  splitter:SetPoint("TOPLEFT",    listPane, "TOPRIGHT", 0, 0)
+  splitter:SetPoint("BOTTOMLEFT", listPane, "BOTTOMRIGHT", 0, 0)
+
+  splitter.tex = splitter:CreateTexture(nil, "ARTWORK")
+  splitter.tex:SetAllPoints(splitter)
+  splitter.tex:SetColorTexture(0.23, 0.23, 0.27, 1)
+
+  splitter.hoverTex = splitter:CreateTexture(nil, "HIGHLIGHT")
+  splitter.hoverTex:SetAllPoints(splitter)
+  splitter.hoverTex:SetColorTexture(0.45, 0.45, 0.55, 1)
+
+  splitter:EnableMouse(true)
+  splitter:RegisterForDrag("LeftButton")
+  splitter.dragging = false
+
+  splitter:SetScript("OnMouseDown", function(self) self.dragging = true end)
+  splitter:SetScript("OnMouseUp",   function(self)
+    self.dragging = false
+    SaveListPaneWidth(listPane:GetWidth())
+  end)
+
+  splitter:SetScript("OnUpdate", function(self)
+    if not self.dragging then return end
+    local scale = parent:GetEffectiveScale()
+    local cx = select(1, GetCursorPosition()) / scale
+    local parentLeft = parent:GetLeft()
+    if not parentLeft then return end
+    local localX = cx - parentLeft - 6  -- 6 matches CreatePanes TOPLEFT offset
+    if localX < MIN_LIST_PANE_WIDTH then localX = MIN_LIST_PANE_WIDTH end
+    local maxList = parent:GetWidth() - SPLITTER_WIDTH - MIN_DETAIL_PANE_WIDTH - 16
+    -- 16 = left margin 6 + post-splitter gap 4 + right margin 6
+    if localX > maxList then localX = maxList end
+    listPane:SetWidth(localX)
+    detailPane:ClearAllPoints()
+    detailPane:SetPoint("TOPLEFT",     parent, "TOPLEFT",     6 + localX + SPLITTER_WIDTH + 4, -64)
+    detailPane:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -6, 40)
+  end)
+
+  parent.splitter = splitter
+  return splitter
 end
 
 local pauseRow, pausePills
@@ -1477,6 +1549,7 @@ local function BuildFrame()
   CreatePauseRow(frame)
   if HistoryPanel.RefreshPauseRow then HistoryPanel.RefreshPauseRow() end
   listPane, detailPane = CreatePanes(frame)
+  CreateSplitter(frame)
   CreateListPane()
   CreateDetailPane()
   CreateHeaderFilters()
@@ -1490,6 +1563,7 @@ local function BuildFrame()
 
   frame:SetScript("OnSizeChanged", function()
     sizeDirty = true
+    ClampPanes(frame)
     if listPane and listPane.scroll then listPane.scroll:FullUpdate() end
   end)
   frame:SetScript("OnHide", function()
