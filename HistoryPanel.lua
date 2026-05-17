@@ -79,8 +79,25 @@ local SORT_LABELS = {
 
 local DOUBLE_CLICK_WINDOW    = 0.4
 local MAX_ORIGINAL_CHARS     = 800
-local AUDIT_COLLAPSED_HEIGHT = 20
-local AUDIT_EXPANDED_HEIGHT  = 80
+
+-- BSP-008 Commit 5: stats area tile metadata (used by BuildStatsArea +
+-- RefreshStatsArea below; declared at file scope so RenderActions / other
+-- helpers don't need to forward-reference them).
+local STATS_TILE_KEYS = { "detected", "blocked", "passThru", "restored", "falsePositives" }
+local STATS_TILE_LABELS = {
+  detected       = "DETECTED",
+  blocked        = "BLOCKED",
+  passThru       = "PASS-THRU",
+  restored       = "RESTORED",
+  falsePositives = "FALSE POSITIVES",
+}
+local STATS_TILE_COLORS = {
+  detected       = { 1.00, 1.00, 1.00 },
+  blocked        = { 1.00, 0.47, 0.33 },
+  passThru       = { 0.67, 0.48, 0.23 },
+  restored       = { 0.35, 0.82, 0.50 },
+  falsePositives = { 0.53, 0.67, 0.80 },
+}
 
 local fallbackMenuFrame
 
@@ -434,11 +451,23 @@ local function RenderRow(row, entry)
   local hex = CATEGORY_COLORS[cat] or "888"
   row.stripe:SetColorTexture(HexNibble(hex, 1), HexNibble(hex, 2), HexNibble(hex, 3), 1)
 
+  local outcome = entry.outcome or "blocked"
+  if outcome == "pass-thru" then
+    row:SetAlpha(0.65)
+  else
+    row:SetAlpha(1.0)
+  end
+
   row.timeText:SetText(RelativeTime(entry.ts))
 
   local senderLabel = entry.name or "?"
   if entry.realm and entry.realm ~= "" then
     senderLabel = senderLabel .. "-" .. entry.realm
+  end
+  if outcome == "pass-thru" then
+    senderLabel = senderLabel .. " |cffaa7a3a(pass-thru)|r"
+  elseif outcome == "restored" then
+    senderLabel = "|cff5ad080\226\156\147|r " .. senderLabel
   end
   row.senderText:SetText(senderLabel)
 
@@ -484,80 +513,12 @@ local function ShowEmptyState(show)
   end
 end
 
-local function RenderBreakdown(breakdown)
-  local container = detailPane.breakdown
-  container.rows = container.rows or {}
-
-  for _, r in ipairs(container.rows) do r:Hide() end
-
-  local i = 0
-  local total = 0
-  if type(breakdown) == "table" then
-    for cat, val in pairs(breakdown) do
-      i = i + 1
-      local row = container.rows[i]
-      if not row then
-        row = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        container.rows[i] = row
-      end
-      row:ClearAllPoints()
-      row:SetPoint("TOPLEFT",  container, "TOPLEFT",   8, -16 - (i - 1) * 14)
-      row:SetPoint("TOPRIGHT", container, "TOPRIGHT", -8, -16 - (i - 1) * 14)
-      row:SetJustifyH("LEFT")
-      row:SetText(string.format("%-20s |cffffbb33%+5d|r", tostring(cat), tonumber(val) or 0))
-      row:Show()
-      total = total + (tonumber(val) or 0)
-    end
-  end
-
-  i = i + 1
-  local totalRow = container.rows[i]
-  if not totalRow then
-    totalRow = container:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    container.rows[i] = totalRow
-  end
-  totalRow:ClearAllPoints()
-  totalRow:SetPoint("TOPLEFT",  container, "TOPLEFT",   8, -16 - (i - 1) * 14)
-  totalRow:SetPoint("TOPRIGHT", container, "TOPRIGHT", -8, -16 - (i - 1) * 14)
-  totalRow:SetText(string.format("%-20s |cffffbb33%+5d|r", "Total", total))
-  totalRow:Show()
-end
-
 local RefreshDetail
-local function RenderAudit(entry)
-  local devMode = NS.DB and NS.DB.IsDevMode and NS.DB.IsDevMode()
-  local body = detailPane.audit.body
-
-  -- BSP-002 §4.6 contract: `cleansed` is the only devMode-gated extension to
-  -- the persisted history record. Structured audit (antiSignals / ruleId hits)
-  -- is not stored; revisit when a session-local audit cache lands.
-  local parts = {}
-  if devMode and entry.cleansed and entry.cleansed ~= "" then
-    parts[#parts + 1] = "cleansed: " .. entry.cleansed
-  end
-  if #parts == 0 then
-    parts[#parts + 1] = devMode
-      and "(no extra audit data; cleansed text is empty)"
-      or  "(audit detail available in devMode only)"
-  end
-
-  body:SetText(table.concat(parts, "\n"))
-  body:SetShown(detailPane.auditExpanded == true)
-  detailPane.audit.label:SetText(detailPane.auditExpanded
-    and "Hide audit details \226\150\188"
-    or  "Show audit details \226\150\182")
-end
-
-local function ToggleAudit()
-  detailPane.auditExpanded = not detailPane.auditExpanded
-  if detailPane.audit then
-    detailPane.audit:SetHeight(
-      detailPane.auditExpanded and AUDIT_EXPANDED_HEIGHT or AUDIT_COLLAPSED_HEIGHT)
-  end
-  if RefreshDetail then RefreshDetail() end
-end
 
 local function RenderSenderHistory(entry)
+  if not detailPane or not detailPane.footer or not detailPane.footer.senderHistory then
+    return
+  end
   local entries = CurrentEntries()
   local count, firstSeen, lastSeen = 0, nil, nil
   for _, e in ipairs(entries) do
@@ -574,7 +535,7 @@ local function RenderSenderHistory(entry)
     end
   end
 
-  detailPane.sender.stats:SetText(string.format(
+  detailPane.footer.senderHistory:SetText(string.format(
     "Total blocks: %d   \194\183   First seen: %s   \194\183   Last seen: %s",
     count,
     firstSeen and RelativeTime(firstSeen) or "\226\128\148",
@@ -609,6 +570,28 @@ local function PerformAlwaysAllow(entry)
   if not entry or not entry.guid or entry.guid == "" then return end
   if NS.Trust and NS.Trust.AddAllowlist then
     NS.Trust.AddAllowlist(entry.guid, entry.name, entry.realm, "history")
+  end
+  if RefreshList then RefreshList() end
+end
+
+local function PerformBlockRetroactively(entry)
+  if not entry or entry.outcome ~= "pass-thru" then return end
+  if NS.History and NS.History.RetroactiveBlock then
+    NS.History.RetroactiveBlock(entry.id)
+  end
+  -- Fire ReportFlow if a report kind exists for this surface. ReportFlow only
+  -- registers reports for blocked entries today, so retroactive block needs to
+  -- enqueue the report payload itself; the helpers below no-op if the report
+  -- record is unavailable.
+  local surface = entry.surface
+  if NS.ReportFlow then
+    if (surface == "chat" or surface == "whisper" or surface == "bn-whisper")
+       and NS.ReportFlow.ReportChatNow then
+      NS.ReportFlow.ReportChatNow(entry.id)
+    elseif (surface == "lfg-search" or surface == "lfg-applicant")
+       and NS.ReportFlow.ReportLFGAdvertisementNow then
+      NS.ReportFlow.ReportLFGAdvertisementNow(entry.id)
+    end
   end
   if RefreshList then RefreshList() end
 end
@@ -770,57 +753,198 @@ local function RenderActions(entry)
 
   if not entry then return end
 
-  -- Already restored: keep a disabled "Restored" indicator visible so the
-  -- user can see the action took effect (don't blank the buttons out).
-  if entry.outcome == "restored" then
-    actions.btn1:SetText("\226\156\147 Restored")
-    actions.btn1:SetScript("OnClick", nil)
+  local outcome = entry.outcome or "blocked"
+
+  if outcome == "restored" then
+    actions.btn1:SetText(L("\226\156\147 Restored"))
     actions.btn1:Disable()
     actions.btn1:Show()
     if NS.Trust and NS.Trust.IsAllowlisted and entry.guid and entry.guid ~= ""
        and NS.Trust.IsAllowlisted(entry.guid) then
-      actions.btn2:SetText("Allowlisted")
-      actions.btn2:SetScript("OnClick", nil)
+      actions.btn2:SetText(L("Allowlisted"))
       actions.btn2:Disable()
       actions.btn2:Show()
     end
     return
   end
 
+  if outcome == "pass-thru" then
+    actions.btn1:SetText(L("Block retroactively"))
+    actions.btn1:SetScript("OnClick", function()
+      PerformBlockRetroactively(entry)
+    end)
+    actions.btn1:Show()
+    local allowable = (entry.surface == "chat" or entry.surface == "whisper" or entry.surface == "bn-whisper")
+      and entry.guid and entry.guid ~= ""
+    if allowable and not (NS.Trust and NS.Trust.IsAllowlisted and NS.Trust.IsAllowlisted(entry.guid)) then
+      actions.btn2:SetText(L("Always allow"))
+      actions.btn2:SetScript("OnClick", function() PerformAlwaysAllow(entry) end)
+      actions.btn2:Show()
+    end
+    return
+  end
+
+  -- outcome == "blocked": existing behavior with broadened allowlist eligibility
+  -- (chat + whisper + bn-whisper now qualify, up from chat-only).
   local reportKind = GetReportKind(entry)
   local reportLabel = GetReportLabel(reportKind)
 
   if reportLabel then
-    actions.btn1:SetText("Restore")
+    actions.btn1:SetText(L("Restore"))
     actions.btn1:SetScript("OnClick", function() PerformRestore(entry) end)
     actions.btn1:Show()
-    actions.btn2:SetText(reportLabel)
+    actions.btn2:SetText(L(reportLabel))
     actions.btn2:SetScript("OnClick", function() PerformReport(entry) end)
     actions.btn2:Show()
     return
   end
 
-  if entry.surface == "chat" and entry.guid and entry.guid ~= "" then
+  local allowable = (entry.surface == "chat" or entry.surface == "whisper" or entry.surface == "bn-whisper")
+    and entry.guid and entry.guid ~= ""
+  if allowable then
     local already = NS.Trust and NS.Trust.IsAllowlisted and NS.Trust.IsAllowlisted(entry.guid)
     if already then
-      actions.btn1:SetText("Restore")
+      actions.btn1:SetText(L("Restore"))
       actions.btn1:SetScript("OnClick", function() PerformRestore(entry) end)
       actions.btn1:Show()
     else
-      actions.btn1:SetText("Restore + Always allow")
+      actions.btn1:SetText(L("Restore + Always allow"))
       actions.btn1:SetScript("OnClick", function()
         PerformRestore(entry)
         PerformAlwaysAllow(entry)
       end)
       actions.btn1:Show()
-      actions.btn2:SetText("Restore only")
+      actions.btn2:SetText(L("Restore only"))
       actions.btn2:SetScript("OnClick", function() PerformRestore(entry) end)
       actions.btn2:Show()
     end
   else
-    actions.btn1:SetText("Restore")
+    actions.btn1:SetText(L("Restore"))
     actions.btn1:SetScript("OnClick", function() PerformRestore(entry) end)
     actions.btn1:Show()
+  end
+end
+
+local function RefreshStatsArea()
+  if not detailPane or not detailPane.stats then return end
+  local stats = NS.History and NS.History.GetStats and NS.History.GetStats() or { lifetime = {}, retained = {} }
+  local lifetime = stats.lifetime or {}
+
+  local detected = tonumber(lifetime.detections) or 0
+  local blocked  = tonumber(lifetime.blocked) or 0
+  local passThru = tonumber(lifetime.passThru) or 0
+  local restored = tonumber(lifetime.restored) or 0
+  local fpRate
+  if blocked > 0 then
+    fpRate = string.format("%.1f%%", (restored / blocked) * 100)
+  else
+    fpRate = "\226\128\148"  -- em dash
+  end
+
+  local values = {
+    detected       = tostring(detected),
+    blocked        = tostring(blocked),
+    passThru       = tostring(passThru),
+    restored       = tostring(restored),
+    falsePositives = fpRate,
+  }
+  for key, tile in pairs(detailPane.stats.tiles) do
+    tile.valueText:SetText(values[key] or "\226\128\148")
+    local color = STATS_TILE_COLORS[key]
+    if color then
+      tile.valueText:SetTextColor(color[1], color[2], color[3])
+    end
+  end
+
+  -- By-surface inline line.
+  local bySurface = lifetime.bySurface or {}
+  local surfaceParts = {}
+  local surfaceOrder = { "chat", "whisper", "bn-whisper", "lfg-search", "lfg-applicant" }
+  for _, s in ipairs(surfaceOrder) do
+    local label = SURFACE_LABELS[s] or s
+    surfaceParts[#surfaceParts + 1] = string.format("%s |cffffffff%d|r", L(label), tonumber(bySurface[s]) or 0)
+  end
+  detailPane.stats.bySurfaceText:SetText(table.concat(surfaceParts, "   "))
+
+  -- By-category inline line; paused/off categories render muted.
+  local byCategory = lifetime.byCategory or {}
+  local categoryParts = {}
+  for _, cat in ipairs(CATEGORIES) do
+    local count = tonumber(byCategory[cat]) or 0
+    local hex = CATEGORY_COLORS[cat] or "888"
+    local hexFull = hex .. hex  -- 3-char hex doubled to 6 for color codes
+    local state = NS.PauseState and NS.PauseState.GetCategory and NS.PauseState.GetCategory(cat) or "active"
+    local part
+    if state == "paused" or state == "off" then
+      part = string.format("|cff%s%s|r |cff888888%d|r", hexFull, L(cat), count)
+    else
+      part = string.format("|cff%s%s|r |cffffffff%d|r", hexFull, L(cat), count)
+    end
+    categoryParts[#categoryParts + 1] = part
+  end
+  detailPane.stats.byCategoryText:SetText(table.concat(categoryParts, "   "))
+
+  local throttled = tonumber(lifetime.throttled) or 0
+  local bubbles   = tonumber(lifetime.bubblesSuppressed) or 0
+  detailPane.stats.pipelineText:SetText(string.format(
+    "%s |cffffffff%d|r   %s |cffffffff%d|r",
+    L("Throttled"), throttled, L("Bubbles suppressed"), bubbles))
+end
+
+local function RenderBodyFlex(entry)
+  if not detailPane or not detailPane.body then return end
+  local body = detailPane.body
+  local original = entry and entry.original or ""
+  if #original > MAX_ORIGINAL_CHARS then
+    original = original:sub(1, MAX_ORIGINAL_CHARS) .. " \226\128\166(truncated)"
+  end
+  body.text:SetText(original)
+
+  -- Auto-size: measure FontString natural height and set frame height to match.
+  local naturalHeight = body.text:GetStringHeight() or 0
+  local desired = math.max(naturalHeight + 16, 80)  -- 16 = top+bottom padding; 80 = min
+  body:SetHeight(desired)
+end
+
+local function RenderBreakdownChips(breakdown)
+  if not detailPane or not detailPane.footer or not detailPane.footer.breakdownRow then return end
+  local row = detailPane.footer.breakdownRow
+  row.chips = row.chips or {}
+
+  for _, chip in ipairs(row.chips) do chip:Hide() end
+
+  if type(breakdown) ~= "table" then return end
+
+  local sorted = {}
+  for cat, val in pairs(breakdown) do
+    if cat ~= "MixedScript" and (tonumber(val) or 0) > 0 then
+      sorted[#sorted + 1] = { cat = cat, val = val }
+    end
+  end
+  table.sort(sorted, function(a, b) return (a.val or 0) > (b.val or 0) end)
+
+  local xOffset = 0
+  for index, item in ipairs(sorted) do
+    local chip = row.chips[index]
+    if not chip then
+      chip = CreateFrame("Frame", nil, row, "BackdropTemplate")
+      if chip.SetBackdrop then
+        chip:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+      end
+      chip.label = chip:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      chip.label:SetPoint("CENTER", chip, "CENTER", 0, 0)
+      row.chips[index] = chip
+    end
+    local hex = CATEGORY_COLORS[item.cat] or "888"
+    if chip.SetBackdropColor then
+      chip:SetBackdropColor(HexNibble(hex, 1), HexNibble(hex, 2), HexNibble(hex, 3), 1)
+    end
+    chip.label:SetText(string.format("|cff000000%s +%d|r", item.cat, item.val))
+    chip:SetSize(80, 14)
+    chip:ClearAllPoints()
+    chip:SetPoint("LEFT", row, "LEFT", xOffset, 0)
+    chip:Show()
+    xOffset = xOffset + 84
   end
 end
 
@@ -830,6 +954,7 @@ RefreshDetail = function()
   local entries = CurrentEntries()
   if #entries == 0 then
     ShowEmptyState(true)
+    RefreshStatsArea()
     return
   end
   ShowEmptyState(false)
@@ -840,32 +965,40 @@ RefreshDetail = function()
     entry = sorted[1]
     if entry then selectedEntryId = entry.id end
   end
-  if not entry then return end
+  if not entry then RefreshStatsArea() return end
 
-  local channel = FormatChannel(entry)
-  local linkSuffix = entry.containsItemLinks and "   \194\183   contains item link" or ""
+  -- Header
+  local channel      = FormatChannel(entry)
+  local linkSuffix   = entry.containsItemLinks and ("   " .. L("contains item link")) or ""
   local surfaceLabel = (entry.surface and SURFACE_LABELS[entry.surface]) or entry.surface or "?"
   detailPane.header.senderText:SetText(FormatSender(entry))
-  detailPane.header.metaText:SetText(string.format("%s   \194\183   %s%s",
-    surfaceLabel, channel, linkSuffix))
 
-  local statusText = (entry.outcome == "restored")
-    and "|cff5ad080RESTORED|r"
-    or  "|cffff5577BLOCKED|r"
-  detailPane.header.statusText:SetText(statusText)
-  detailPane.header.scoreText:SetText(string.format("%s   \194\183   %d / %d",
-    entry.reason or "score", tonumber(entry.score) or 0, tonumber(entry.threshold) or 0))
-
-  local original = entry.original or ""
-  if #original > MAX_ORIGINAL_CHARS then
-    original = original:sub(1, MAX_ORIGINAL_CHARS) .. " \226\128\166(truncated)"
+  local outcome = entry.outcome or "blocked"
+  local statusText
+  local pauseReason = ""
+  if outcome == "restored" then
+    statusText = "|cff5ad080" .. L("RESTORED") .. "|r"
+  elseif outcome == "pass-thru" then
+    statusText = "|cffaa7a3a" .. L("PASSED THROUGH") .. "|r"
+    local surfaceKey = entry.surface or "chat"
+    local surfaceState = NS.PauseState and NS.PauseState.GetSurface and NS.PauseState.GetSurface(surfaceKey) or "active"
+    if surfaceState == "paused" then
+      pauseReason = "   " .. L(surfaceLabel) .. " " .. L("surface paused")
+    end
+  else
+    statusText = "|cffff5577" .. L("BLOCKED") .. "|r"
   end
-  detailPane.original.body:SetText(original)
+  statusText = statusText .. string.format("   %d / %d",
+    tonumber(entry.score) or 0, tonumber(entry.threshold) or 0)
+  detailPane.header.statusText:SetText(statusText)
+  detailPane.header.metaText:SetText(string.format("%s   %s%s%s",
+    L(surfaceLabel), channel, linkSuffix, pauseReason))
 
-  RenderBreakdown(entry.breakdown)
-  RenderAudit(entry)
+  RenderBodyFlex(entry)
+  RenderBreakdownChips(entry.breakdown)
   RenderSenderHistory(entry)
   RenderActions(entry)
+  RefreshStatsArea()
 end
 
 RefreshList = function()
@@ -1037,6 +1170,84 @@ local function CreateListPane()
   listPane.legend = legend
 end
 
+local function PlaceStatsTiles(stats)
+  if not stats.tiles or not stats.tilesRow then return end
+  local rowWidth = stats.tilesRow:GetWidth()
+  if not rowWidth or rowWidth <= 0 then return end
+  local tileCount = #STATS_TILE_KEYS
+  local gap = 4
+  local tileWidth = math.floor((rowWidth - gap * (tileCount - 1)) / tileCount)
+  if tileWidth < 56 then tileWidth = 56 end
+  for index, key in ipairs(STATS_TILE_KEYS) do
+    local tile = stats.tiles[key]
+    tile:ClearAllPoints()
+    tile:SetSize(tileWidth, 38)
+    if index == 1 then
+      tile:SetPoint("LEFT", stats.tilesRow, "LEFT", 0, 0)
+    else
+      local prevTile = stats.tiles[STATS_TILE_KEYS[index - 1]]
+      tile:SetPoint("LEFT", prevTile, "RIGHT", gap, 0)
+    end
+  end
+end
+
+local function BuildStatsArea(parent)
+  parent.titleLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  parent.titleLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, -6)
+  parent.titleLabel:SetText(L("DETECTION STATS"))
+
+  parent.tilesRow = CreateFrame("Frame", nil, parent)
+  parent.tilesRow:SetHeight(38)
+  parent.tilesRow:SetPoint("TOPLEFT",  parent, "TOPLEFT",  6, -22)
+  parent.tilesRow:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -6, -22)
+
+  parent.tiles = {}
+  for _, key in ipairs(STATS_TILE_KEYS) do
+    local tile = CreateFrame("Frame", nil, parent.tilesRow, "BackdropTemplate")
+    if tile.SetBackdrop then
+      tile:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+      tile:SetBackdropColor(0.13, 0.13, 0.16, 1)
+    end
+    tile.valueText = tile:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    tile.valueText:SetPoint("TOP", tile, "TOP", 0, -2)
+    tile.labelText = tile:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    tile.labelText:SetPoint("BOTTOM", tile, "BOTTOM", 0, 4)
+    tile.labelText:SetText(L(STATS_TILE_LABELS[key]))
+    parent.tiles[key] = tile
+  end
+  parent.tilesRow:SetScript("OnSizeChanged", function() PlaceStatsTiles(parent) end)
+  PlaceStatsTiles(parent)
+
+  parent.bySurfaceLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  parent.bySurfaceLabel:SetPoint("TOPLEFT", parent.tilesRow, "BOTTOMLEFT", 0, -8)
+  parent.bySurfaceLabel:SetText(L("BY SURFACE"))
+
+  parent.bySurfaceText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  parent.bySurfaceText:SetPoint("TOPLEFT",  parent.bySurfaceLabel, "BOTTOMLEFT", 0, -2)
+  parent.bySurfaceText:SetPoint("TOPRIGHT", parent, "RIGHT", -10, 0)
+  parent.bySurfaceText:SetJustifyH("LEFT")
+  parent.bySurfaceText:SetWordWrap(true)
+
+  parent.byCategoryLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  parent.byCategoryLabel:SetPoint("TOPLEFT", parent.bySurfaceText, "BOTTOMLEFT", 0, -8)
+  parent.byCategoryLabel:SetText(L("BY CATEGORY"))
+
+  parent.byCategoryText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  parent.byCategoryText:SetPoint("TOPLEFT",  parent.byCategoryLabel, "BOTTOMLEFT", 0, -2)
+  parent.byCategoryText:SetPoint("TOPRIGHT", parent, "RIGHT", -10, 0)
+  parent.byCategoryText:SetJustifyH("LEFT")
+  parent.byCategoryText:SetWordWrap(true)
+
+  parent.pipelineLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  parent.pipelineLabel:SetPoint("TOPLEFT", parent.byCategoryText, "BOTTOMLEFT", 0, -8)
+  parent.pipelineLabel:SetText(L("PIPELINE"))
+
+  parent.pipelineText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  parent.pipelineText:SetPoint("TOPLEFT", parent.pipelineLabel, "BOTTOMLEFT", 0, -2)
+  parent.pipelineText:SetPoint("RIGHT",   parent, "RIGHT", -10, 0)
+  parent.pipelineText:SetJustifyH("LEFT")
+end
+
 local function BuildEmptyState(parent)
   local f = CreateFrame("Frame", nil, parent)
   f:SetAllPoints(parent)
@@ -1059,120 +1270,93 @@ end
 local function CreateDetailPane()
   detailPane.sections = {}
 
+  -- Status header (~50px tall, anchored TOP)
   local hdr = CreateFrame("Frame", nil, detailPane, "BackdropTemplate")
-  hdr:SetHeight(72)
+  hdr:SetHeight(50)
   hdr:SetPoint("TOPLEFT",  detailPane, "TOPLEFT",  0, 0)
   hdr:SetPoint("TOPRIGHT", detailPane, "TOPRIGHT", 0, 0)
-  hdr:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
-  hdr:SetBackdropColor(0x2a / 255, 0x2a / 255, 0x32 / 255, 1)
+  if hdr.SetBackdrop then
+    hdr:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+    hdr:SetBackdropColor(0.16, 0.16, 0.20, 1)
+  end
 
   hdr.senderText = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  hdr.senderText:SetPoint("TOPLEFT", hdr, "TOPLEFT", 8, -6)
-
-  hdr.metaText = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  hdr.metaText:SetPoint("TOPLEFT", hdr, "TOPLEFT", 8, -28)
+  hdr.senderText:SetPoint("TOPLEFT", hdr, "TOPLEFT", 10, -6)
 
   hdr.statusText = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  hdr.statusText:SetPoint("TOPRIGHT", hdr, "TOPRIGHT", -8, -6)
+  hdr.statusText:SetPoint("TOPRIGHT", hdr, "TOPRIGHT", -10, -6)
 
-  hdr.scoreText = hdr:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  hdr.scoreText:SetPoint("TOPRIGHT", hdr, "TOPRIGHT", -8, -28)
+  hdr.metaText = hdr:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  hdr.metaText:SetPoint("BOTTOMLEFT",  hdr, "BOTTOMLEFT",  10, 6)
+  hdr.metaText:SetPoint("BOTTOMRIGHT", hdr, "BOTTOMRIGHT", -10, 6)
+  hdr.metaText:SetJustifyH("LEFT")
+
   detailPane.header = hdr
   detailPane.sections.header = hdr
 
-  -- Bottom-up layout: actions pin to detailPane bottom, sender/audit/breakdown
-  -- stack upward, and the original-message section flexes to fill whatever
-  -- remains between the header (top) and the breakdown (bottom of the stack).
-  -- This keeps the layout correct across all panel heights and prevents
-  -- sender/actions from overlapping at MIN_PANEL_HEIGHT.
+  -- Message body (auto-size, min 80px)
+  local body = CreateFrame("Frame", nil, detailPane)
+  body:SetPoint("TOPLEFT",  hdr, "BOTTOMLEFT",  0, -4)
+  body:SetPoint("TOPRIGHT", hdr, "BOTTOMRIGHT", 0, -4)
+  body:SetHeight(80)
+  body.text = body:CreateFontString(nil, "OVERLAY", "ChatFontNormal")
+  body.text:SetPoint("TOPLEFT",     body, "TOPLEFT",      10, -8)
+  body.text:SetPoint("TOPRIGHT",    body, "TOPRIGHT",    -10, -8)
+  body.text:SetPoint("BOTTOMLEFT",  body, "BOTTOMLEFT",   10,  8)
+  body.text:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -10,  8)
+  body.text:SetJustifyH("LEFT")
+  body.text:SetJustifyV("TOP")
+  body.text:SetWordWrap(true)
+  body.text:SetNonSpaceWrap(true)
+  detailPane.body = body
+  detailPane.sections.body = body
 
-  local actions = CreateFrame("Frame", nil, detailPane)
-  actions:SetHeight(40)
-  actions:SetPoint("BOTTOMLEFT",  detailPane, "BOTTOMLEFT",  0, 0)
-  actions:SetPoint("BOTTOMRIGHT", detailPane, "BOTTOMRIGHT", 0, 0)
+  -- Footer (breakdown chips + sender history + actions)
+  local footer = CreateFrame("Frame", nil, detailPane, "BackdropTemplate")
+  footer:SetHeight(64)
+  footer:SetPoint("TOPLEFT",  body, "BOTTOMLEFT",  0, -4)
+  footer:SetPoint("TOPRIGHT", body, "BOTTOMRIGHT", 0, -4)
+  if footer.SetBackdrop then
+    footer:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+    footer:SetBackdropColor(0.13, 0.13, 0.16, 1)
+  end
 
-  local sender = CreateFrame("Frame", nil, detailPane)
-  sender:SetHeight(36)
-  sender:SetPoint("BOTTOMLEFT",  actions, "TOPLEFT",  0, 4)
-  sender:SetPoint("BOTTOMRIGHT", actions, "TOPRIGHT", 0, 4)
-  sender.label = sender:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  sender.label:SetPoint("TOPLEFT",  sender, "TOPLEFT",  0, 0)
-  sender.label:SetPoint("TOPRIGHT", sender, "TOPRIGHT", 0, 0)
-  sender.label:SetJustifyH("LEFT")
-  sender.label:SetText("|cff5ad080SENDER HISTORY|r")
+  footer.breakdownRow = CreateFrame("Frame", nil, footer)
+  footer.breakdownRow:SetHeight(16)
+  footer.breakdownRow:SetPoint("TOPLEFT",  footer, "TOPLEFT",   8, -6)
+  footer.breakdownRow:SetPoint("TOPRIGHT", footer, "TOPRIGHT", -8, -6)
+  footer.breakdownRow.chips = {}
 
-  sender.stats = sender:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  sender.stats:SetPoint("TOPLEFT",  sender, "TOPLEFT",   8, -16)
-  sender.stats:SetPoint("TOPRIGHT", sender, "TOPRIGHT", -8, -16)
-  sender.stats:SetJustifyH("LEFT")
-  sender.stats:SetWordWrap(true)
-  detailPane.sender = sender
-  detailPane.sections.sender = sender
+  footer.senderHistory = footer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  footer.senderHistory:SetPoint("TOPLEFT",  footer.breakdownRow, "BOTTOMLEFT",  0, -4)
+  footer.senderHistory:SetPoint("TOPRIGHT", footer.breakdownRow, "BOTTOMRIGHT", 0, -4)
+  footer.senderHistory:SetJustifyH("LEFT")
 
-  -- Audit toggle. Bottom-up anchored to sender.TOPLEFT so that growing the
-  -- audit Button's height pushes the breakdown (and the rest of the stack
-  -- above) UPWARD — keeping the body fully contained inside the audit frame
-  -- instead of overflowing into the sender section.
-  local audit = CreateFrame("Button", nil, detailPane)
-  audit:SetHeight(AUDIT_COLLAPSED_HEIGHT)
-  audit:SetPoint("BOTTOMLEFT",  sender, "TOPLEFT",  0, 4)
-  audit:SetPoint("BOTTOMRIGHT", sender, "TOPRIGHT", 0, 4)
-  audit.label = audit:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  audit.label:SetPoint("LEFT", audit, "LEFT", 0, 0)
-  audit.label:SetText("Show audit details \226\150\182")
-  audit:SetScript("OnClick", ToggleAudit)
-  audit.body = audit:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  audit.body:SetPoint("TOPLEFT",     audit, "TOPLEFT",     0, -18)
-  audit.body:SetPoint("BOTTOMRIGHT", audit, "BOTTOMRIGHT", 0,   2)
-  audit.body:SetJustifyH("LEFT")
-  audit.body:SetWordWrap(true)
-  audit.body:Hide()
-  detailPane.audit = audit
-  detailPane.auditExpanded = false
-  detailPane.sections.audit = audit
+  footer.btn1 = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
+  footer.btn1:SetSize(160, 22)
+  footer.btn1:SetPoint("BOTTOMRIGHT", footer, "BOTTOMRIGHT", -6, 6)
+  footer.btn1:Hide()
 
-  local brk = CreateFrame("Frame", nil, detailPane)
-  brk:SetHeight(130)
-  brk:SetPoint("BOTTOMLEFT",  audit, "TOPLEFT",  0, 8)
-  brk:SetPoint("BOTTOMRIGHT", audit, "TOPRIGHT", 0, 8)
-  brk.label = brk:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  brk.label:SetPoint("TOPLEFT", brk, "TOPLEFT", 0, 0)
-  brk.label:SetText("|cffffbb33WHY BLOCKED \226\128\148 SCORE BREAKDOWN|r")
-  brk.rows = {}
-  detailPane.breakdown = brk
-  detailPane.sections.breakdown = brk
+  footer.btn2 = CreateFrame("Button", nil, footer, "UIPanelButtonTemplate")
+  footer.btn2:SetSize(120, 22)
+  footer.btn2:SetPoint("RIGHT", footer.btn1, "LEFT", -4, 0)
+  footer.btn2:Hide()
 
-  local orig = CreateFrame("Frame", nil, detailPane)
-  -- Flex height: anchored TOP to header.BOTTOM and BOTTOM to breakdown.TOP
-  orig:SetPoint("TOPLEFT",     hdr, "BOTTOMLEFT",  0, -8)
-  orig:SetPoint("TOPRIGHT",    hdr, "BOTTOMRIGHT", 0, -8)
-  orig:SetPoint("BOTTOMLEFT",  brk, "TOPLEFT",     0, 8)
-  orig:SetPoint("BOTTOMRIGHT", brk, "TOPRIGHT",    0, 8)
-  orig.label = orig:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  orig.label:SetPoint("TOPLEFT", orig, "TOPLEFT", 0, 0)
-  orig.label:SetText("|cff58a0ffORIGINAL MESSAGE|r")
-  orig.body = orig:CreateFontString(nil, "OVERLAY", "ChatFontNormal")
-  orig.body:SetPoint("TOPLEFT",     orig, "TOPLEFT",      8, -16)
-  orig.body:SetPoint("TOPRIGHT",    orig, "TOPRIGHT",    -8, -16)
-  orig.body:SetPoint("BOTTOMLEFT",  orig, "BOTTOMLEFT",   8,   4)
-  orig.body:SetPoint("BOTTOMRIGHT", orig, "BOTTOMRIGHT", -8,   4)
-  orig.body:SetJustifyH("LEFT")
-  orig.body:SetJustifyV("TOP")
-  orig.body:SetNonSpaceWrap(true)
-  detailPane.original = orig
-  detailPane.sections.original = orig
+  detailPane.footer = footer
+  detailPane.actions = { btn1 = footer.btn1, btn2 = footer.btn2 }
+  detailPane.sections.footer = footer
 
-  actions.btn1 = CreateFrame("Button", nil, actions, "UIPanelButtonTemplate")
-  actions.btn1:SetSize(184, 24)
-  actions.btn1:SetPoint("LEFT", actions, "LEFT", 0, 0)
-  actions.btn1:Hide()
-  actions.btn2 = CreateFrame("Button", nil, actions, "UIPanelButtonTemplate")
-  actions.btn2:SetSize(120, 24)
-  actions.btn2:SetPoint("LEFT", actions.btn1, "RIGHT", 6, 0)
-  actions.btn2:Hide()
-  detailPane.actions = actions
-  detailPane.sections.actions = actions
+  -- Stats area (flex-grow to fill below footer)
+  local stats = CreateFrame("Frame", nil, detailPane)
+  stats:SetPoint("TOPLEFT",     footer, "BOTTOMLEFT",  0, -6)
+  stats:SetPoint("TOPRIGHT",    footer, "BOTTOMRIGHT", 0, -6)
+  stats:SetPoint("BOTTOMLEFT",  detailPane, "BOTTOMLEFT",  0, 0)
+  stats:SetPoint("BOTTOMRIGHT", detailPane, "BOTTOMRIGHT", 0, 0)
+  BuildStatsArea(stats)
+  detailPane.stats = stats
+  detailPane.sections.stats = stats
 
+  -- Empty state placeholder (replaces header/body/footer when nothing selected)
   detailPane.empty = BuildEmptyState(detailPane)
   detailPane.empty:Hide()
 end
