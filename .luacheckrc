@@ -57,12 +57,14 @@ read_globals = {
 
     -- WoW API (C_ namespaces)
     "C_BattleNet",
+    "C_CVar",
     "C_FriendList",
     "C_Timer",
 
     -- WoW API (functions)
     "ChatFrameUtil",
     "ChatFrame_AddMessageEventFilter",
+    "GetCVarBool",
     "GetServerTime",
     "GetTime",
     "hooksecurefunc",
