@@ -39,6 +39,10 @@ local function Initialize()
 		NS.ConfigPanel.Initialize()
 	end
 
+  if NS.BubbleSuppressor and NS.BubbleSuppressor.RegisterCleanup then
+    NS.BubbleSuppressor.RegisterCleanup()
+  end
+
 	initialized = true
 end
 

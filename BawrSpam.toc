@@ -13,6 +13,7 @@ Patterns.lua
 Scoring.lua
 Trust.lua
 Throttle.lua
+BubbleSuppressor.lua
 Suppression.lua
 History.lua
 ChatScanner.lua

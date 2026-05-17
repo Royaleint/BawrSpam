@@ -140,6 +140,9 @@ local function Pipeline(
       { Throttle = settings.threshold },
       "throttle"
     ), counter)
+    if NS.BubbleSuppressor and NS.BubbleSuppressor.Engage then
+      NS.BubbleSuppressor.Engage(event, settings)
+    end
     return true
   end
 
@@ -161,6 +164,10 @@ local function Pipeline(
     score.breakdown,
     "score"
   ), counter)
+
+  if NS.BubbleSuppressor and NS.BubbleSuppressor.Engage then
+    NS.BubbleSuppressor.Engage(event, settings)
+  end
 
   return true
 end
@@ -187,6 +194,10 @@ function ChatScanner.Filter(
   counter,
   guid
 )
+  if NS.BubbleSuppressor and NS.BubbleSuppressor.MaybeRestore then
+    NS.BubbleSuppressor.MaybeRestore()
+  end
+
   local ok, blocked = xpcall(function()
     return Pipeline(
       event,
