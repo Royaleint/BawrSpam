@@ -1350,8 +1350,49 @@ RenderDetection = function()
   y = AddSlider("Mixed-script weight", "mixedScriptWeight", 0, 3, 1, y,
     "Score weight added when a message mixes Latin with another script (Cyrillic, etc.) \194\151 " ..
     "the classic Unicode-confusable pattern. Set 0 to disable.")
-  AddCheckbox("Use mixed-script detection", "mixedScriptEnabled", y, nil,
+  y = AddCheckbox("Use mixed-script detection", "mixedScriptEnabled", y, nil,
     "Enable Unicode-confusable script-mixing as a signal in scoring.")
+
+  -- BSP-010: Throttle controls. Cannot reuse AddSlider/AddCheckbox helpers
+  -- here because their SettingValue(key) reads are flat-keyed and these
+  -- live under settings.throttle.*. Inline via AddAceWidget directly,
+  -- matching the History section's max-entries-slider pattern.
+  local throttle = (GetSettings() and GetSettings().throttle) or {}
+
+  local throttleCheckbox = AddAceWidget("CheckBox", CONTENT_PAD, y, 360)
+  if throttleCheckbox then
+    throttleCheckbox:SetLabel("Throttle confirmed-spam repeats")
+    throttleCheckbox:SetValue(throttle.enabled ~= false)
+    throttleCheckbox:SetCallback("OnValueChanged", function(_, _, value)
+      if NS.DB and NS.DB.SetThrottleEnabled then
+        NS.DB.SetThrottleEnabled(value == true)
+      end
+    end)
+    AttachTooltip(throttleCheckbox, "Throttle confirmed-spam repeats",
+      "When the same cleansed text and sender GUID repeats inside the buffer window, " ..
+      "the second hit is auto-blocked. Only runs on messages already scored as spam \194\151 " ..
+      "legitimate repeats are unaffected.")
+    y = y - 32
+  else
+    y = AddDisabledRow("Throttle confirmed-spam repeats", "AceGUI unavailable", y)
+  end
+
+  local throttleSlider = AddAceWidget("Slider", CONTENT_PAD, y, 330)
+  if throttleSlider then
+    throttleSlider:SetLabel("Throttle buffer size")
+    throttleSlider:SetSliderValues(5, 50, 1)
+    throttleSlider:SetValue(tonumber(throttle.bufferSize) or 20)
+    throttleSlider:SetCallback("OnValueChanged", function(_, _, value)
+      if NS.DB and NS.DB.SetThrottleBufferSize then
+        NS.DB.SetThrottleBufferSize(math.floor((tonumber(value) or 20) + 0.5))
+      end
+    end)
+    AttachTooltip(throttleSlider, "Throttle buffer size",
+      "How many recent confirmed-spam messages per surface are remembered for dedupe. " ..
+      "Larger = longer memory window. Range 5\194\17750.")
+  else
+    AddDisabledRow("Throttle buffer size", "AceGUI unavailable", y)
+  end
 end
 
 RenderCategories = function()
