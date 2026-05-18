@@ -1687,12 +1687,21 @@ RenderDev = function()
   y = AddStatus(y, sectionStatus.Dev)
   y = AddCheckbox("Enable dev mode", "devMode", y, nil,
     "Enable developer-only diagnostics: extra logging, devMode-gated error reporting, " ..
-    "test slash commands, and other diagnostic affordances.")
+    "/bdev slash commands, and other diagnostic affordances.")
   AddNativeButton("Reset Settings", CONTENT_PAD, y, 120, function()
     if StaticPopup_Show then
       StaticPopup_Show("BAWRSPAM_RESET_SETTINGS")
     end
   end, "Reset ALL settings to defaults. Does not touch History, Allowlist, or Blocked. Confirmation required.")
+  -- BSP-018: FP-export tool. Same gating semantics as /bdev fpx — the
+  -- OpenFPExportDialog function checks devMode and prints a status message
+  -- if off, so the button is visible always (discoverability) but only
+  -- functional when devMode is enabled.
+  AddNativeButton("Export FP fixtures", CONTENT_PAD + 130, y, 150, function()
+    ConfigPanel.OpenFPExportDialog(nil)
+  end, "Export false-positive entries from History as a paste-ready Lua " ..
+    "negatives block for fixtures.lua. Equivalent to /bdev fpx. " ..
+    "Requires devMode to be enabled.")
 end
 
 local RENDERERS = {
