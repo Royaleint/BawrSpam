@@ -69,6 +69,13 @@ function Throttle.Check(event, cleansed, guid)
     return false
   end
 
+  -- BSP-010 polish (post-Argus): validate event before the buffers[event]
+  -- lookup. ChatScanner.lua:184 always passes a string constant today, but a
+  -- future caller passing nil would hit `buffers[nil]` → "table index is nil".
+  if type(event) ~= "string" or event == "" then
+    return false
+  end
+
   if type(guid) ~= "string" or guid == "" or type(cleansed) ~= "string" or cleansed == "" then
     return false
   end

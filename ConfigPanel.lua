@@ -1391,6 +1391,9 @@ RenderDetection = function()
       "How many recent confirmed-spam messages per surface are remembered for dedupe. " ..
       "Larger = longer memory window. Range 5\194\17750.")
   else
+    -- Slider is the last control in RenderDetection; y is unused after this.
+    -- Skip the `y =` assignment that the checkbox's else branch has, since
+    -- assigning here would trigger luacheck's "value assigned but unused" warning.
     AddDisabledRow("Throttle buffer size", "AceGUI unavailable", y)
   end
 end
