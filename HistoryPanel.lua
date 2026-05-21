@@ -310,8 +310,19 @@ local function HidePortraitChrome(f)
   end
 end
 
+local function CreateHistoryFrame(parent)
+  local template = (NS.Compat and NS.Compat.isClassicEra)
+    and "ButtonFrameTemplate"
+    or "PortraitFrameTemplate"
+  local ok, f = pcall(CreateFrame, "Frame", "BawrSpamHistoryFrame", parent, template)
+  if ok and f then
+    return f
+  end
+  return CreateFrame("Frame", "BawrSpamHistoryFrame", parent, "PortraitFrameTemplate")
+end
+
 local function CreateBackdropFrame(parent)
-  local f = CreateFrame("Frame", "BawrSpamHistoryFrame", parent, "PortraitFrameTemplate")
+  local f = CreateHistoryFrame(parent)
   f.layoutType = "ButtonFrameTemplateNoPortrait"
   if f.SetBorder then
     f:SetBorder("ButtonFrameTemplateNoPortrait")
