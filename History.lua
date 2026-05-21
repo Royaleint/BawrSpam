@@ -6,6 +6,7 @@ local MAX_PRINT_LIMIT = 25
 local IGNORED_BREAKDOWN_KEYS = {
   MixedScript = true,
   BlockedActor = true,
+  Flood = true,
 }
 
 local function GetChar()
