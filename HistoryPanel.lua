@@ -310,10 +310,52 @@ local function HidePortraitChrome(f)
   end
 end
 
+local function CreatePlainHistoryFrame(parent)
+  local ok, f = pcall(CreateFrame, "Frame", "BawrSpamHistoryFrame", parent, "BackdropTemplate")
+  if not ok or not f then
+    f = CreateFrame("Frame", "BawrSpamHistoryFrame", parent)
+  end
+  if f.SetBackdrop then
+    f:SetBackdrop({
+      bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = true, tileSize = 16, edgeSize = 16,
+      insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    f:SetBackdropColor(0.02, 0.02, 0.025, 0.96)
+    f:SetBackdropBorderColor(0.35, 0.36, 0.42, 1)
+  end
+
+  local header = CreateFrame("Frame", nil, f)
+  header:SetHeight(28)
+  header:SetPoint("TOPLEFT",  f, "TOPLEFT",   6, -6)
+  header:SetPoint("TOPRIGHT", f, "TOPRIGHT", -30, -6)
+  header:EnableMouse(true)
+  header:RegisterForDrag("LeftButton")
+  header:SetScript("OnDragStart", function() f:StartMoving() end)
+  header:SetScript("OnDragStop", function()
+    f:StopMovingOrSizing()
+    SavePosition()
+  end)
+
+  header.TitleText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  header.TitleText:SetPoint("CENTER", header, "CENTER", 0, 0)
+  header.TitleText:SetText(L("BawrSpam — History"))
+  f.TitleContainer = header
+
+  local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, -2)
+  close:SetScript("OnClick", function() f:Hide() end)
+  f.CloseButton = close
+
+  return f
+end
+
 local function CreateHistoryFrame(parent)
-  local template = (NS.Compat and NS.Compat.isClassicEra)
-    and "ButtonFrameTemplate"
-    or "PortraitFrameTemplate"
+  if NS.Compat and NS.Compat.isClassicEra then
+    return CreatePlainHistoryFrame(parent)
+  end
+  local template = "PortraitFrameTemplate"
   local ok, f = pcall(CreateFrame, "Frame", "BawrSpamHistoryFrame", parent, template)
   if ok and f then
     return f
