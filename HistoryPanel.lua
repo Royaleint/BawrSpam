@@ -495,6 +495,12 @@ local function VisibleRowCount(scroll)
   return count
 end
 
+local function ClassicScrollBar(scroll)
+  if not scroll or not scroll.GetName then return nil end
+  local name = scroll:GetName()
+  return name and _G[name .. "ScrollBar"] or nil
+end
+
 local function DominantCategory(breakdown)
   if type(breakdown) ~= "table" then return nil end
   local bestCat, bestVal
@@ -1144,11 +1150,20 @@ RefreshList = function()
   if listPane.listBackend == "classic" then
     local scroll = listPane.scroll
     local visibleRows = VisibleRowCount(scroll)
+    local scrollable = #filtered > visibleRows
+    if not scrollable and scroll.SetVerticalScroll then
+      scroll:SetVerticalScroll(0)
+    end
     -- Keep the FauxScrollFrame visible even when the list is shorter than the
     -- viewport; otherwise Blizzard's template hides the frame and its rows.
+    -- Hide only the scrollbar chrome when there is nothing to scroll.
     FauxScrollFrame_Update(scroll, #filtered, visibleRows, LIST_ROW_HEIGHT,
       nil, nil, nil, nil, nil, nil, true)
-    local offset = FauxScrollFrame_GetOffset(scroll)
+    local scrollBar = ClassicScrollBar(scroll)
+    if scrollBar then
+      scrollBar:SetShown(scrollable)
+    end
+    local offset = scrollable and FauxScrollFrame_GetOffset(scroll) or 0
 
     for i = 1, LIST_MAX_ROWS do
       local row = scroll.rows[i]
@@ -1701,7 +1716,7 @@ local function BuildCategoryChips(strip)
       local body = active
         and "Currently included in the list. Click to hide entries in this category."
         or  "Currently hidden from the list. Click to show entries in this category."
-      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetOwner(self, "ANCHOR_BOTTOMRIGHT")
       GameTooltip:AddLine(L(fullName))
       GameTooltip:AddLine(L(body), 1.00, 1.00, 1.00, true)
       GameTooltip:Show()
