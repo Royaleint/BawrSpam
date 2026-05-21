@@ -16,6 +16,7 @@ Patterns.lua
 Scoring.lua
 Trust.lua
 Throttle.lua
+Frequency.lua
 BubbleSuppressor.lua
 Suppression.lua
 History.lua
