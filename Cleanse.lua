@@ -217,7 +217,10 @@ function Cleanse._Stage9_Symbols(text)
 end
 
 -- Returns boolean. Flushes word state on any non-letter codepoint.
-local function _DetectMixedScript(text)
+-- BSP-030: promoted from a file-local to a Cleanse member. Analyze no longer
+-- calls it (the fused front-end below detects mixed-script inline); it is
+-- retained as the executable spec the differential test reconstructs against.
+function Cleanse._DetectMixedScript(text)
   if not text or text == "" then return false end
   local function scriptOf(cp)
     if (cp >= 0x41 and cp <= 0x5A) or (cp >= 0x61 and cp <= 0x7A) then return "latin" end
@@ -250,6 +253,133 @@ local function _DetectMixedScript(text)
   return mixed
 end
 
+-- BSP-030: fused single-pass front-end. Collapses Stages 2-5 + mixed-script
+-- detection — previously FIVE separate _ScanCodepoints rebuilds (Stages 2,3,4,5
+-- + a _DetectMixedScript pass that built and threw away a whole copy) — into ONE
+-- codepoint walk with one output buffer. Pure-ASCII input fast-paths past it
+-- entirely (Stages 2-5 are identity on ASCII; ASCII is never mixed-script).
+-- Byte-identical to the staged pipeline, locked by run_cleanse_differential in
+-- BawrSpam_Dev/tools/. The _Stage2..5 / _DetectMixedScript functions above are
+-- retained as that spec and as unit-test targets — do not delete them.
+local function _isFormatChar(cp)
+  if cp == 0x00AD or cp == 0xFEFF or cp == 0x2060 then return true end
+  if cp >= 0x200B and cp <= 0x200D then return true end
+  if cp >= 0xFE00 and cp <= 0xFE0F then return true end
+  if cp >= 0x202A and cp <= 0x202E then return true end
+  if cp >= 0xE0000 and cp <= 0xE007F then return true end
+  return false
+end
+
+local function _isCombiningMark(cp)
+  if cp >= 0x0300 and cp <= 0x036F then return true end
+  if cp >= 0x1AB0 and cp <= 0x1AFF then return true end
+  if cp >= 0x1DC0 and cp <= 0x1DFF then return true end
+  if cp >= 0x20D0 and cp <= 0x20FF then return true end
+  if cp >= 0xFE20 and cp <= 0xFE2F then return true end
+  return false
+end
+
+local function _styledFold(cp)
+  if cp >= 0x1D400 and cp <= 0x1D419 then return 0x41 + (cp - 0x1D400) end
+  if cp >= 0x1D41A and cp <= 0x1D433 then return 0x61 + (cp - 0x1D41A) end
+  if cp >= 0x1D7CE and cp <= 0x1D7D7 then return 0x30 + (cp - 0x1D7CE) end
+  if cp >= 0xFF21 and cp <= 0xFF3A then return 0x41 + (cp - 0xFF21) end
+  if cp >= 0xFF41 and cp <= 0xFF5A then return 0x61 + (cp - 0xFF41) end
+  if cp >= 0xFF10 and cp <= 0xFF19 then return 0x30 + (cp - 0xFF10) end
+  if cp >= 0x24B6 and cp <= 0x24CF then return 0x41 + (cp - 0x24B6) end
+  if cp >= 0x24D0 and cp <= 0x24E9 then return 0x61 + (cp - 0x24D0) end
+  return cp
+end
+
+local function _scriptOf(cp)
+  if (cp >= 0x41 and cp <= 0x5A) or (cp >= 0x61 and cp <= 0x7A) then return "latin" end
+  if cp >= 0x0400 and cp <= 0x04FF then return "cyrillic" end
+  if cp >= 0x0370 and cp <= 0x03FF then return "greek" end
+  if cp >= 0x0590 and cp <= 0x05FF then return "hebrew" end
+  if cp >= 0x0600 and cp <= 0x06FF then return "arabic" end
+  return nil
+end
+
+local function _emit(out, n, cp)
+  if cp < 0x80 then
+    n = n + 1; out[n] = string.char(cp)
+  elseif cp < 0x800 then
+    n = n + 1; out[n] = string.char(0xC0 + math.floor(cp / 64), 0x80 + (cp % 64))
+  elseif cp < 0x10000 then
+    n = n + 1; out[n] = string.char(0xE0 + math.floor(cp / 4096),
+      0x80 + math.floor((cp % 4096) / 64), 0x80 + (cp % 64))
+  else
+    n = n + 1; out[n] = string.char(0xF0 + math.floor(cp / 262144),
+      0x80 + math.floor((cp % 262144) / 4096), 0x80 + math.floor((cp % 4096) / 64), 0x80 + (cp % 64))
+  end
+  return n
+end
+
+-- One codepoint walk = Stages 2,3,4,5 + mixed-script. Decoder mirrors
+-- _ScanCodepoints exactly (incl. 0xFFFD on malformed UTF-8). Returns the folded
+-- string and the mixedScript boolean. Format/combining codepoints are skipped
+-- entirely (not emitted, and not treated as word boundaries) — matching the
+-- staged order where Stages 2/3 strip them before mixed-script detection runs.
+function Cleanse._FusedFrontPass(text)
+  local out, n = {}, 0
+  local i, len = 1, #text
+  local mixed = false
+  local wordHasLatin, wordHasOther = false, false
+
+  while i <= len do
+    local b1 = string.byte(text, i)
+    local cp, width
+    if b1 < 0x80 then
+      cp, width = b1, 1
+    elseif b1 < 0xC0 then
+      cp, width = 0xFFFD, 1
+    elseif b1 < 0xE0 then
+      local b2 = string.byte(text, i + 1)
+      if b1 >= 0xC2 and b2 and b2 >= 0x80 and b2 <= 0xBF then
+        cp = ((b1 - 0xC0) * 64) + (b2 - 0x80); width = 2
+      else cp, width = 0xFFFD, 1 end
+    elseif b1 < 0xF0 then
+      local b2 = string.byte(text, i + 1)
+      local b3 = string.byte(text, i + 2)
+      if b2 and b3 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF
+          and not (b1 == 0xE0 and b2 < 0xA0) and not (b1 == 0xED and b2 > 0x9F) then
+        cp = ((b1 - 0xE0) * 4096) + ((b2 - 0x80) * 64) + (b3 - 0x80); width = 3
+      else cp, width = 0xFFFD, 1 end
+    elseif b1 < 0xF5 then
+      local b2 = string.byte(text, i + 1)
+      local b3 = string.byte(text, i + 2)
+      local b4 = string.byte(text, i + 3)
+      if b2 and b3 and b4 and b2 >= 0x80 and b2 <= 0xBF and b3 >= 0x80 and b3 <= 0xBF
+          and b4 >= 0x80 and b4 <= 0xBF
+          and not (b1 == 0xF0 and b2 < 0x90) and not (b1 == 0xF4 and b2 > 0x8F) then
+        cp = ((b1 - 0xF0) * 262144) + ((b2 - 0x80) * 4096) + ((b3 - 0x80) * 64) + (b4 - 0x80); width = 4
+      else cp, width = 0xFFFD, 1 end
+    else
+      cp, width = 0xFFFD, 1
+    end
+
+    if not (_isFormatChar(cp) or _isCombiningMark(cp)) then
+      local s = _scriptOf(cp)                 -- mixed-script uses the ORIGINAL cp, pre-fold
+      if not s then
+        if wordHasLatin and wordHasOther then mixed = true end
+        wordHasLatin, wordHasOther = false, false
+      elseif s == "latin" then
+        wordHasLatin = true
+      else
+        wordHasOther = true
+      end
+      local folded = Cleanse._confusables[cp] or cp   -- Stage 4 then Stage 5
+      folded = _styledFold(folded)
+      n = _emit(out, n, folded)
+    end
+
+    i = i + width
+  end
+  if wordHasLatin and wordHasOther then mixed = true end
+
+  return table.concat(out), mixed
+end
+
 function Cleanse.Analyze(text)
   if type(text) ~= "string" then
     return { normalized = "", signals = { mixedScript = false, containsItemLinks = false } }
@@ -258,15 +388,15 @@ function Cleanse.Analyze(text)
   local containsItemLinks = string.find(text, "|H", 1, true) ~= nil
 
   text = Cleanse._Stage1_ItemLinks(text)
-  text = Cleanse._Stage2_FormatChars(text)
-  text = Cleanse._Stage3_CombiningMarks(text)
 
-  -- mixedScript must run before Stage 4 (confusable fold collapses non-Latin to Latin,
-  -- erasing the signal).
-  local mixedScript = _DetectMixedScript(text)
+  -- BSP-030: Stages 2-5 + mixed-script in one pass, with a pure-ASCII fast-path.
+  local mixedScript
+  if not string.find(text, "[\128-\255]") then
+    mixedScript = false                       -- ASCII: stages 2-5 identity, never mixed
+  else
+    text, mixedScript = Cleanse._FusedFrontPass(text)
+  end
 
-  text = Cleanse._Stage4_Confusables(text)
-  text = Cleanse._Stage5_StyledAlnum(text)
   text = Cleanse._Stage6_Leetspeak(text)
   text = Cleanse._Stage7_Lowercase(text)
   text = Cleanse._Stage8_RunLength(text)
