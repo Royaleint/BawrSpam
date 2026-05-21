@@ -32,6 +32,7 @@ local BLOCKED_ACTOR_BOOST = 2
 local IGNORED_BREAKDOWN_KEYS = {
   MixedScript = true,
   BlockedActor = true,
+  Flood = true,
 }
 
 local function DevLog(message)
@@ -143,6 +144,28 @@ local function ApplyBlockedActorBoost(score, guid)
   score.blocked = score.score >= score.threshold
 end
 
+-- BSP-027: pre-score flood boost. Repetition is a spam signal independent of
+-- content — the same cleansed line seen >= TRIGGER times within the window
+-- (ANY sender) accrues an escalating "Flood" weight so a flood blocks even at
+-- content-score 0. Mirrors ApplyBlockedActorBoost: mutate-in-place, bail if
+-- already blocked, recompute blocked against the carried threshold. Flood is a
+-- meta key (in IGNORED_BREAKDOWN_KEYS) so it never becomes a content category.
+local function ApplyFloodBoost(score, cleansed)
+  if not score or score.blocked or not NS.Frequency or not NS.Frequency.RecordAndCount then
+    return
+  end
+  local count = NS.Frequency.RecordAndCount(cleansed, ServerTime())
+  local boost = NS.Frequency.BoostFor and NS.Frequency.BoostFor(count) or 0
+  if boost <= 0 then
+    return
+  end
+  score.breakdown = type(score.breakdown) == "table" and score.breakdown or {}
+  score.breakdown.Flood = (tonumber(score.breakdown.Flood) or 0) + boost
+  score.score = (tonumber(score.score) or 0) + boost
+  score.threshold = tonumber(score.threshold) or 4
+  score.blocked = score.score >= score.threshold
+end
+
 local function AppendBlockedHistory(record, counter)
   local entryID = NS.History and NS.History.Append and NS.History.Append(record)
   if record and record.outcome == "blocked" and NS.DB and NS.DB.RecordBlockedActor then
@@ -193,6 +216,7 @@ local function Pipeline(
   local settings = GetSettings()
   local score = NS.Scoring and NS.Scoring.Score and NS.Scoring.Score(analysis, BuildScoringOptions(settings))
   ApplyBlockedActorBoost(score, guid)
+  ApplyFloodBoost(score, analysis.normalized)
   if not score or not score.blocked then
     return false
   end
