@@ -7,6 +7,9 @@ BawrSpam_Dev/
 # Agent / tool layer (Claude Code, Codex)
 .claude/
 .codex/
+
+# Agent-entry docs — canonical lives in BawrSpam_Dev/agent-entry/, hardlinked to root (STU-046)
+CLAUDE.md
 AGENTS.md
 
 # WoW packager working files
