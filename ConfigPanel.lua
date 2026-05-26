@@ -2135,6 +2135,163 @@ function ConfigPanel.OpenFPExportDialog(limit)
     "Close", nil)
 end
 
+-- BSP-049: meta breakdown keys that are never a content category. Mirrors
+-- History.lua's IGNORED_BREAKDOWN_KEYS (the canonical set the spec points to)
+-- so the dominant category here matches History/HistoryPanel stats logic.
+local HISTORY_EXPORT_IGNORED_KEYS = {
+  MixedScript = true,
+  BlockedActor = true,
+  Flood = true,
+}
+
+-- BSP-049: build a raw (NOT Lua-escaped) corpus-candidate export from ALL
+-- History entries, deduped by exact `original` string. For each unique
+-- original we accumulate: occurrence count, dominant content category (max
+-- weight across occurrences), max score, and the set of outcomes seen. Sorted
+-- by count descending so the most-repeated spam (highest-value corpus
+-- candidates) lead. Optional `limit` caps to the top-N unique originals.
+--
+-- Read-only: History.GetAll returns live record refs; we iterate without
+-- mutating and build our own dedup table. Output is plain text for hand
+-- triage into spam_master.txt — not a fixtures block, so no Lua escaping.
+local function BuildHistoryExportText(limit)
+  if limit and limit <= 0 then limit = nil end
+
+  local entries = NS.History and NS.History.GetAll and NS.History.GetAll() or {}
+  local totalRecords = #entries
+
+  -- Dedup by exact original string. uniques[original] = aggregate; order[]
+  -- preserves first-seen order for stable sorting of equal-count entries.
+  local uniques, order = {}, {}
+  for i = 1, #entries do
+    local record = entries[i]
+    local original = record.original
+    if type(original) == "string" and original ~= "" then
+      local agg = uniques[original]
+      if not agg then
+        agg = {
+          original = original,
+          count = 0,
+          maxScore = nil,
+          catWeights = {},
+          outcomes = {},
+        }
+        uniques[original] = agg
+        order[#order + 1] = agg
+      end
+      agg.count = agg.count + 1
+
+      local score = tonumber(record.score)
+      if score and (not agg.maxScore or score > agg.maxScore) then
+        agg.maxScore = score
+      end
+
+      -- Accumulate category weight across occurrences so the dominant
+      -- category reflects the strongest signal this text ever produced.
+      local breakdown = record.breakdown
+      if type(breakdown) == "table" then
+        for cat, val in pairs(breakdown) do
+          local numeric = tonumber(val) or 0
+          if not HISTORY_EXPORT_IGNORED_KEYS[cat] and numeric > 0 then
+            agg.catWeights[cat] = math.max(agg.catWeights[cat] or 0, numeric)
+          end
+        end
+      end
+
+      agg.outcomes[record.outcome or "blocked"] = true
+    end
+  end
+
+  local uniqueCount = #order
+
+  -- Sort by count descending; ties keep first-seen (newest-first) order via
+  -- the stored index so the sort is deterministic.
+  for index, agg in ipairs(order) do
+    agg.sortIndex = index
+  end
+  table.sort(order, function(a, b)
+    if a.count ~= b.count then
+      return a.count > b.count
+    end
+    return a.sortIndex < b.sortIndex
+  end)
+
+  if limit and #order > limit then
+    local trimmed = {}
+    for i = 1, limit do trimmed[i] = order[i] end
+    order = trimmed
+  end
+
+  local lines = {
+    string.format("-- BawrSpam history export: %d records, %d unique%s",
+      totalRecords, uniqueCount,
+      limit and (" (top " .. tostring(limit) .. " shown)") or ""),
+    "-- Exported: " .. (date and date("%Y-%m-%d %H:%M:%S") or "?"),
+    "-- Format: [<count>x] <category>/<maxScore> <outcomes> | <raw original>",
+    "",
+  }
+
+  if uniqueCount == 0 then
+    lines[#lines + 1] = "-- No history records found."
+  end
+
+  for i = 1, #order do
+    local agg = order[i]
+
+    -- Dominant category across the accumulated per-category max weights.
+    local bestCat, bestVal
+    for cat, val in pairs(agg.catWeights) do
+      if not bestVal or val > bestVal then
+        bestCat, bestVal = cat, val
+      end
+    end
+
+    -- Stable, sorted outcome list (blocked / pass-thru / restored).
+    local outcomeList = {}
+    for outcome in pairs(agg.outcomes) do
+      outcomeList[#outcomeList + 1] = outcome
+    end
+    table.sort(outcomeList)
+
+    lines[#lines + 1] = string.format("[%dx] %s/%s %s | %s",
+      agg.count,
+      bestCat or "?",
+      agg.maxScore and tostring(agg.maxScore) or "?",
+      table.concat(outcomeList, ","),
+      agg.original)
+  end
+
+  return table.concat(lines, "\n")
+end
+
+function ConfigPanel.OpenHistoryExportDialog(limit)
+  ConfigPanel.Initialize()
+  if NS.DB and NS.DB.IsDevMode and not NS.DB.IsDevMode() then
+    Print("/bdev commands require devMode. Enable in Config \194\187 Dev.")
+    return
+  end
+  if limit and limit <= 0 then limit = nil end
+
+  -- Count unique originals for the title; mirrors BuildHistoryExportText's
+  -- dedup so the displayed count matches the body.
+  local entries = NS.History and NS.History.GetAll and NS.History.GetAll() or {}
+  local seen, uniqueCount = {}, 0
+  for i = 1, #entries do
+    local original = entries[i].original
+    if type(original) == "string" and original ~= "" and not seen[original] then
+      seen[original] = true
+      uniqueCount = uniqueCount + 1
+    end
+  end
+  local shown = uniqueCount
+  if limit and shown > limit then shown = limit end
+
+  ShowTextDialog(
+    "BawrSpam History Corpus Export (" .. tostring(shown) .. " unique)",
+    BuildHistoryExportText(limit),
+    "Close", nil)
+end
+
 function ConfigPanel.OpenExportDialog()
   ConfigPanel.Initialize()
   ShowTextDialog("BawrSpam Allowlist Export", ExportAllowlistText(), "Close", nil)
