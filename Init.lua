@@ -20,13 +20,15 @@ local function Initialize()
     return
   end
 
-  -- BSP-049: enforce historyMaxEntries on every load. Append trims per-append
-  -- and the config slider trims on apply, but neither covers history that ended
-  -- up over-cap by another path (a previously-higher cap, a reset-to-default,
-  -- an older version). Settings are loaded by now (DB.Initialize ran above), so
-  -- TrimToMax() reads the current cap and removes only the oldest excess.
-  if NS.History and NS.History.TrimToMax then
-    NS.History.TrimToMax()
+  -- BSP-050 (extends BSP-049): enforce history caps on every load across all
+  -- characters, not just the current one. Append trims per-append and the
+  -- config sliders trim on apply, but neither reaches alts the player isn't
+  -- logged into. TrimAllCharacters walks db.sv.char and enforces both the
+  -- per-char cap and the new account-wide cap; bloated alts that predate the
+  -- upgrade are trimmed on first post-upgrade login (the v3 migration also
+  -- runs it once and announces the trim; this is the persistent safety net).
+  if NS.History and NS.History.TrimAllCharacters then
+    NS.History.TrimAllCharacters()
   end
 
   -- BSP-010: push SavedVariables throttle settings into the runtime module
@@ -286,6 +288,38 @@ local function RunPerf(rest)
   else
     Print("perf: C_AddOnProfiler unavailable on this client")
   end
+
+  -- BSP-050: surface the cross-char history footprint alongside memory/CPU so
+  -- Gate 2 can sanity-check that the trim-all path is holding both caps. Reads
+  -- the current char's count via DB.GetChar(), and sums #history across every
+  -- char bucket in db.sv.char for the global total. Caps come from settings
+  -- (already clamped by RepairSettings on Initialize). Defensive against
+  -- missing db.sv / non-table char data — prints "?" rather than erroring.
+  local current, global, perCharCap, globalCap = "?", "?", "?", "?"
+  local settings = NS.DB and NS.DB.GetSettings and NS.DB.GetSettings()
+  if settings then
+    perCharCap = tonumber(settings.historyMaxEntries) or 300
+    globalCap  = tonumber(settings.historyGlobalMaxEntries) or 1000
+  end
+  local charView = NS.DB and NS.DB.GetChar and NS.DB.GetChar()
+  if type(charView) == "table" and type(charView.history) == "table" then
+    current = #charView.history
+  end
+  if NS.DB and NS.DB.db and type(NS.DB.db.sv) == "table"
+    and type(NS.DB.db.sv.char) == "table" then
+    local total = 0
+    for _, charData in pairs(NS.DB.db.sv.char) do
+      if type(charData) == "table" and type(charData.history) == "table" then
+        total = total + #charData.history
+      end
+    end
+    global = total
+  end
+  Print(format(
+    "perf %s: history current=%s global=%s (cap perChar=%s, global=%s)",
+    label, tostring(current), tostring(global),
+    tostring(perCharCap), tostring(globalCap)
+  ))
 end
 
 local COMMANDS = {
