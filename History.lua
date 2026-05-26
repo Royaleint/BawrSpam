@@ -273,6 +273,83 @@ function History.TrimToMax(maxEntries)
   return removed
 end
 
+local function BulkTrimOldest(history, max)
+  local n = #history
+  if n <= max then return 0 end
+  local shift = n - max
+  for i = 1, max do history[i] = history[i + shift] end
+  for i = max + 1, n do history[i] = nil end
+  return shift
+end
+
+local function EvictToGlobalCap(charTable, globalCap)
+  local refs, refCount = {}, 0
+  for charKey, charData in pairs(charTable) do
+    if type(charData) == "table" and type(charData.history) == "table" then
+      local h = charData.history
+      for idx = 1, #h do
+        if type(h[idx]) == "table" then
+          refCount = refCount + 1
+          refs[refCount] = {
+            ts      = tonumber(h[idx].ts) or 0,
+            charKey = charKey,
+            idx     = idx,
+          }
+        end
+      end
+    end
+  end
+  if refCount <= globalCap then return 0 end
+
+  table.sort(refs, function(a, b) return a.ts < b.ts end)
+  local toDrop = refCount - globalCap
+  local dropByChar = {}
+  for i = 1, toDrop do
+    local r = refs[i]
+    dropByChar[r.charKey] = dropByChar[r.charKey] or {}
+    dropByChar[r.charKey][r.idx] = true
+  end
+
+  for charKey, dropSet in pairs(dropByChar) do
+    local h = charTable[charKey].history
+    local kept, k = {}, 0
+    for idx = 1, #h do
+      if not dropSet[idx] then
+        k = k + 1
+        kept[k] = h[idx]
+      end
+    end
+    for idx = 1, k do h[idx] = kept[idx] end
+    for idx = k + 1, #h do h[idx] = nil end
+  end
+
+  return toDrop
+end
+
+function History.TrimAllCharacters()
+  if not NS.DB or not NS.DB.db or not NS.DB.db.sv then return 0, 0 end
+  local charTable = NS.DB.db.sv.char
+  if type(charTable) ~= "table" then return 0, 0 end
+
+  -- Caps are clamped at the data-layer boundary (DB.SetSetting on slider commit,
+  -- RepairSettings on DB.Initialize, ResetSettings via CopyDefaults+RepairSettings).
+  -- By the time we run, settings are already in range; defaults via `or N` cover
+  -- nil / non-numeric. Trusting the input here lets unit tests exercise the
+  -- algorithm at small scales (e.g. globalCap=2) without re-deriving the cap layer.
+  local settings   = (NS.DB.GetSettings and NS.DB.GetSettings()) or {}
+  local perCharCap = tonumber(settings.historyMaxEntries) or 300
+  local globalCap  = tonumber(settings.historyGlobalMaxEntries) or 1000
+
+  local perCharRemoved = 0
+  for _, charData in pairs(charTable) do
+    if type(charData) == "table" and type(charData.history) == "table" then
+      perCharRemoved = perCharRemoved + BulkTrimOldest(charData.history, perCharCap)
+    end
+  end
+  local globalRemoved = EvictToGlobalCap(charTable, globalCap)
+  return perCharRemoved, globalRemoved
+end
+
 function History.IncrementThrottled()
   local char = GetChar()
   if not char then return end
