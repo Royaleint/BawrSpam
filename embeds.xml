@@ -2,7 +2,15 @@
   <Script file="Libs/LibStub/LibStub.lua"/>
   <Include file="Libs/CallbackHandler-1.0/CallbackHandler-1.0.xml"/>
   <Include file="Libs/AceDB-3.0/AceDB-3.0.xml"/>
-  <Include file="Libs/AceGUI-3.0/AceGUI-3.0.xml"/>
+  <!-- AceGUI pruned to only the widgets BawrSpam actually creates: Slider, CheckBox,
+       MultiLineEditBox (all in ConfigPanel). The full AceGUI-3.0.xml loads 22 widget files
+       (~207 KB); the other ~147 KB (TreeGroup, TabGroup, DropDown, Window, ColorPicker,
+       Keybinding, Icon, …) is never used. If you add a new AceGUI:Create("X"), add
+       widgets/AceGUIWidget-X.lua (or the matching Container file) below. -->
+  <Script file="Libs/AceGUI-3.0/AceGUI-3.0.lua"/>
+  <Script file="Libs/AceGUI-3.0/widgets/AceGUIWidget-Slider.lua"/>
+  <Script file="Libs/AceGUI-3.0/widgets/AceGUIWidget-CheckBox.lua"/>
+  <Script file="Libs/AceGUI-3.0/widgets/AceGUIWidget-MultiLineEditBox.lua"/>
   <Script file="Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua"/>
   <Include file="Libs/LibDBIcon-1.0/lib.xml"/>
 </Ui>
