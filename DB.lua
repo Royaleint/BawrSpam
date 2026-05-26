@@ -481,12 +481,13 @@ function DB.ResetSettings()
 
   global.settings = CopyDefaults(defaults.global.settings)
   RepairSettings(global.settings)
-  -- BSP-049: reset can lower historyMaxEntries (default 300), but the records
-  -- live in char.history and aren't touched here. Trim immediately so the cap
-  -- the user just reset to is authoritative, not enforced only on the next
-  -- Append. Resolves at call-time; History is loaded by reset time.
-  if NS.History and NS.History.TrimToMax then
-    NS.History.TrimToMax()
+  -- BSP-050 (extends BSP-049): reset can lower both historyMaxEntries and the
+  -- new historyGlobalMaxEntries back to defaults, and the records live in
+  -- char.history for every character, not just the current one. Trim across
+  -- all chars immediately so the caps the user just reset to are authoritative
+  -- account-wide, not enforced piecemeal as each alt next logs in.
+  if NS.History and NS.History.TrimAllCharacters then
+    NS.History.TrimAllCharacters()
   end
   return global.settings
 end
