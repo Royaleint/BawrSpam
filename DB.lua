@@ -457,6 +457,13 @@ function DB.ResetSettings()
 
   global.settings = CopyDefaults(defaults.global.settings)
   RepairSettings(global.settings)
+  -- BSP-049: reset can lower historyMaxEntries (default 300), but the records
+  -- live in char.history and aren't touched here. Trim immediately so the cap
+  -- the user just reset to is authoritative, not enforced only on the next
+  -- Append. Resolves at call-time; History is loaded by reset time.
+  if NS.History and NS.History.TrimToMax then
+    NS.History.TrimToMax()
+  end
   return global.settings
 end
 
