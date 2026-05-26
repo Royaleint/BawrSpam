@@ -20,6 +20,15 @@ local function Initialize()
     return
   end
 
+  -- BSP-049: enforce historyMaxEntries on every load. Append trims per-append
+  -- and the config slider trims on apply, but neither covers history that ended
+  -- up over-cap by another path (a previously-higher cap, a reset-to-default,
+  -- an older version). Settings are loaded by now (DB.Initialize ran above), so
+  -- TrimToMax() reads the current cap and removes only the oldest excess.
+  if NS.History and NS.History.TrimToMax then
+    NS.History.TrimToMax()
+  end
+
   -- BSP-010: push SavedVariables throttle settings into the runtime module
   -- so the first chat event uses the persisted values, not Throttle.lua's
   -- module-local defaults. DB.Initialize's RepairSettings pass guarantees
