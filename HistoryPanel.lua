@@ -8,7 +8,8 @@ local function L(s) return s end
 -- BSP-009: GameTooltip helper for widget hover help. Static title/body/hint
 -- variant. For state-aware widgets (pause pills, detail-pane action buttons)
 -- the OnEnter handler is wired inline so the tooltip can read live state.
--- Both Frames and AceGUI widgets are supported via .frame unwrap. EnableMouse
+-- `widget.frame or widget` is a historical compatibility fallback retained
+-- so any future widget wrapper that exposes `.frame` still works. EnableMouse
 -- is asserted because layout-only BackdropTemplate frames default off.
 local function AttachTooltip(widget, title, body, hint)
   if not widget then return end
@@ -729,7 +730,7 @@ local function PerformRestore(entry)
     filterState.outcome = "All"
     -- Modern WowStyle1DropdownTemplate reflects state via its getValue
     -- closure; call GenerateMenu to refresh the visible label after we mutate
-    -- filterState.outcome externally. AceGUI's SetValue is no longer used.
+    -- filterState.outcome externally.
     if frame and frame.filterStrip and frame.filterStrip.outcomeDD
        and frame.filterStrip.outcomeDD.GenerateMenu then
       frame.filterStrip.outcomeDD:GenerateMenu()
