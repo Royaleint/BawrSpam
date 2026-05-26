@@ -7,9 +7,10 @@ local function L(s) return s end
 -- BSP-009: GameTooltip helper for widget hover help. Mirrors HistoryPanel's
 -- AttachTooltip; duplicated locally because the two files are independent
 -- and a single shared module would require .toc load-order plumbing for
--- minor gain. Supports both native Frames/Buttons and AceGUI widgets via
--- .frame unwrap. EnableMouse is asserted because BackdropTemplate hosts
--- default mouse-disabled.
+-- minor gain. `widget.frame or widget` is a historical AceGUI compatibility
+-- fallback retained so any future widget wrapper that exposes `.frame` still
+-- works without a refactor. EnableMouse is asserted because BackdropTemplate
+-- hosts default mouse-disabled.
 local function AttachTooltip(widget, title, body, hint)
   if not widget then return end
   local host = widget.frame or widget
@@ -103,10 +104,9 @@ local embeddedMode
 local initialized
 local interfaceRegistered
 local popupsRegistered
--- BSP-022 Commit 3: aceWidgets ringbuffer removed — the only widget types
--- it tracked (Slider, CheckBox) are now native and live in `nativeChildren`.
--- The MultiLineEditBox dialog (still AceGUI in this commit) owns its own
--- release via dialog.editWidget; full AceGUI removal lands in Commit 4.
+-- BSP-022: aceWidgets ringbuffer removed in Commit 3 (Slider/CheckBox went
+-- native then). MultiLineEditBox dialog went native in Commit 4. ConfigPanel
+-- no longer touches AceGUI at all; embed removal lands in Commit 5.
 local nativeChildren = {}
 local sectionStatus = {}
 local removedAllowlistEntry
@@ -143,13 +143,6 @@ local function Now()
     return GetServerTime()
   end
   return time()
-end
-
-local function EnsureAceGUI()
-  if not LibStub then
-    return nil
-  end
-  return LibStub("AceGUI-3.0", true)
 end
 
 local function GetSettings()
@@ -361,10 +354,6 @@ local function ReleaseNativeChild(child)
 end
 
 local function ReleaseContent()
-  -- BSP-022 Commit 3: AceGUI Slider/CheckBox call sites are gone; this loop
-  -- only manages native widget cleanup now. The MultiLineEditBox dialog
-  -- (still on AceGUI in this commit) owns its own release via dialog.editWidget
-  -- in CloseDialog / ShowTextDialog — see Commit 4 for full removal.
   for _, child in ipairs(nativeChildren) do
     ReleaseNativeChild(child)
   end
@@ -1198,18 +1187,47 @@ local function EnsureDialog()
   return dialogFrame
 end
 
-local function ShowTextDialog(title, text, primaryLabel, primaryHandler)
-  local AceGUI = EnsureAceGUI()
-  if not AceGUI then
-    Print("AceGUI-3.0 is missing; dialog unavailable.")
-    return
-  end
+-- BSP-022 Commit 4: native multiline edit for import/export/FP-fixture
+-- dialogs. Replaces AceGUI:Create("MultiLineEditBox") with a plain EditBox
+-- (SetMultiLine=true) hosted in a UIPanelScrollFrameTemplate ScrollFrame —
+-- the universal pattern present on all 3 flavors (verified in Classic Era
+-- via Blizzard_FrameXML\Classic\ClassTrainerFrameTemplates.xml:81).
+-- ScrollingEditBoxTemplate / InputScrollFrameTemplate are Retail-only and
+-- offer no real upside here over the universal composite.
+local function CreateNativeMultilineEdit(parent, leftInset, topInset, rightInset, bottomInset)
+  local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", leftInset, topInset)
+  -- -27 on the right reserves room for the scrollbar that ships with
+  -- UIPanelScrollFrameTemplate (template default scrollbar width).
+  scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", rightInset - 27, bottomInset)
 
+  local edit = CreateFrame("EditBox", nil, scroll)
+  edit:SetMultiLine(true)
+  edit:SetAutoFocus(false)
+  edit:SetFontObject(ChatFontNormal)
+  edit:SetMaxLetters(0)
+  edit:SetWidth(scroll:GetWidth())
+  edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  -- Keep the EditBox width in sync with the scroll viewport on resize so
+  -- text wraps to the visible width and doesn't overflow horizontally.
+  scroll:SetScript("OnSizeChanged", function(self)
+    edit:SetWidth(self:GetWidth())
+  end)
+
+  scroll:SetScrollChild(edit)
+  scroll:Show()
+  edit:Show()
+
+  return edit, scroll
+end
+
+local function ShowTextDialog(title, text, primaryLabel, primaryHandler)
   local dialog = EnsureDialog()
-  if dialog.editWidget then
-    AceGUI:Release(dialog.editWidget)
-    dialog.editWidget = nil
-  end
+
+  -- Tear down a previous edit/scroll pair so consecutive ShowTextDialog calls
+  -- don't stack frames inside the dialog body.
+  if dialog.editFrame then dialog.editFrame:Hide() end
+  if dialog.editScroll then dialog.editScroll:Hide() end
 
   dialog.textValue = text or ""
   dialog.title:SetText(title)
@@ -1232,27 +1250,23 @@ local function ShowTextDialog(title, text, primaryLabel, primaryHandler)
   end)
   dialog.close:Hide()
 
-  local edit = AceGUI:Create("MultiLineEditBox")
-  dialog.editWidget = edit
-  edit:SetLabel("")
-  edit:SetNumLines(16)
-  edit:SetText(text or "")
-  edit:SetFullWidth(true)
-  edit:DisableButton(true)
-  edit:SetCallback("OnTextChanged", function(_, _, value)
-    dialog.textValue = value or ""
-  end)
-  edit.frame:SetParent(dialog)
-  edit.frame:ClearAllPoints()
-  edit.frame:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -44)
-  edit.frame:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -16, 78)
-  edit.frame:Show()
+  -- Construct the edit lazily on first use; subsequent calls reuse it.
+  if not dialog.editFrame then
+    local edit, scroll = CreateNativeMultilineEdit(dialog, 16, -44, -16, 78)
+    edit:SetScript("OnTextChanged", function(self)
+      dialog.textValue = self:GetText() or ""
+    end)
+    dialog.editFrame = edit
+    dialog.editScroll = scroll
+  end
+
+  dialog.editScroll:Show()
+  dialog.editFrame:Show()
+  dialog.editFrame:SetText(text or "")
 
   dialog:Show()
-  if edit.editBox and edit.editBox.SetFocus then
-    edit.editBox:SetFocus()
-    edit.editBox:HighlightText()
-  end
+  dialog.editFrame:SetFocus()
+  dialog.editFrame:HighlightText()
 end
 
 local function RegisterStaticPopups()
@@ -2223,9 +2237,6 @@ function ConfigPanel.Initialize()
   initialized = true
   RegisterStaticPopups()
   RegisterInterfaceOptions()
-  if not EnsureAceGUI() then
-    DevLog("AceGUI-3.0 is missing; ConfigPanel will show limited controls.")
-  end
 end
 
 function ConfigPanel.Open(section)
