@@ -218,6 +218,22 @@ local function ExportFP(rest)
   end
 end
 
+-- BSP-049: /bdev hx [N] — copyable corpus export of ALL History `original`
+-- strings, deduped by exact text and sorted by occurrence count. Lets Rawb
+-- preserve dogfood records as corpus candidates before a history-cap trim.
+-- Read-only: never mutates char.history. Optional N caps to the top-N unique
+-- originals (first whitespace token, like ExportFP). devMode gate handled by
+-- BdevSlashHandler below — no second check.
+local function ExportHistory(rest)
+  local firstToken = string.match(rest or "", "^(%S+)")
+  local limit = firstToken and tonumber(firstToken) or nil
+  if NS.ConfigPanel and NS.ConfigPanel.OpenHistoryExportDialog then
+    NS.ConfigPanel.OpenHistoryExportDialog(limit)
+  else
+    Print("history export unavailable (ConfigPanel not loaded).")
+  end
+end
+
 -- BSP-048: /bdev perf [label] — one-shot performance snapshot for the
 -- perf-optimization pass. Prints two lines: memory (pre-GC / retained / churn)
 -- and CPU (recent/peak/session avg ms + spike counts). devMode gate handled by
@@ -306,11 +322,12 @@ end
 local DEV_COMMANDS = {
 	test = RunSyntheticTest,
 	fpx  = ExportFP,
+	hx   = ExportHistory,
 	perf = RunPerf,
 }
 
 local function PrintDevUsage()
-	Print("usage: /bdev [test|fpx [N]|perf [label]]")
+	Print("usage: /bdev [test|fpx [N]|hx [N]|perf [label]]")
 end
 
 local function BdevSlashHandler(msg)
