@@ -2074,7 +2074,11 @@ local function CreatePortraitConfigFrame(parent)
   if ok and f then
     return f
   end
-  return CreateFrame("Frame", "BawrSpamConfigFrame", parent, "PortraitFrameTemplate")
+  -- Defensive fallback if Blizzard ever removes PortraitFrameTemplate from a
+  -- future Retail interface revision: drop the template and let ApplyConfigChrome's
+  -- method-existence guards no-op the Portrait-specific work. The frame name is
+  -- preserved so UISpecialFrames + external addon-manager lookups still resolve.
+  return CreateFrame("Frame", "BawrSpamConfigFrame", parent)
 end
 
 local function CreateConfigFrame(parent)
@@ -2170,6 +2174,12 @@ local function CreateNav(parent)
   end
 end
 
+-- BSP-022 / Argus N2: ConfigPanel.Open routes through HistoryPanel.ShowConfig
+-- when HistoryPanel is loaded (the normal case), which always calls Attach()
+-- and hits the embed-mode branch below. The standalone-no-parent branch is a
+-- defensive fallback for the case where HistoryPanel.ShowConfig is missing.
+-- New ConfigPanel callers should still pass through ConfigPanel.Open and let
+-- this routing layer pick the right mode.
 local function BuildFrame(parent)
   local embedded = parent ~= nil
   if frame then
