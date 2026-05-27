@@ -1073,15 +1073,22 @@ local function RefreshStatsArea()
 
   -- By-surface inline line.
   local bySurface = lifetime.bySurface or {}
+  -- BSP-055 Gate 2 followup #11: render BY SURFACE / BY CATEGORY one entry
+  -- per line ("\n" separator) instead of inline-wrapped text. The inline
+  -- format wrapped unpredictably at narrow detail-pane widths, leaving the
+  -- trailing item (e.g. Anti 0) right at the scrollChild's left edge and
+  -- visually adjacent to the splitter line, reading as "clipped." Per-line
+  -- layout is robust to any panel width and works cleanly with the
+  -- ScrollFrame's vertical-scroll behavior — taller content just scrolls.
   local surfaceParts = {}
   local surfaceOrder = { "chat", "whisper", "bn-whisper", "lfg-search", "lfg-applicant" }
   for _, s in ipairs(surfaceOrder) do
     local label = SURFACE_LABELS[s] or s
     surfaceParts[#surfaceParts + 1] = string.format("%s |cffffffff%d|r", L(label), tonumber(bySurface[s]) or 0)
   end
-  detailPane.stats.bySurfaceText:SetText(table.concat(surfaceParts, "   "))
+  detailPane.stats.bySurfaceText:SetText(table.concat(surfaceParts, "\n"))
 
-  -- By-category inline line; paused/off categories render muted.
+  -- By-category vertical list; paused/off categories render muted.
   local byCategory = lifetime.byCategory or {}
   local categoryParts = {}
   for _, cat in ipairs(CATEGORIES) do
@@ -1097,7 +1104,7 @@ local function RefreshStatsArea()
     end
     categoryParts[#categoryParts + 1] = part
   end
-  detailPane.stats.byCategoryText:SetText(table.concat(categoryParts, "   "))
+  detailPane.stats.byCategoryText:SetText(table.concat(categoryParts, "\n"))
 
   local throttled = tonumber(lifetime.throttled) or 0
   local bubbles   = tonumber(lifetime.bubblesSuppressed) or 0
