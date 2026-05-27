@@ -1104,6 +1104,26 @@ local function RefreshStatsArea()
   detailPane.stats.pipelineText:SetText(string.format(
     "%s |cffffffff%d|r   %s |cffffffff%d|r",
     L("Throttled"), throttled, L("Bubbles suppressed"), bubbles))
+
+  -- BSP-055 / Argus Nit 1: size the scrollChild to fit actual content so
+  -- pathological label wrapping (zhCN/ruRU, new surfaces, new categories)
+  -- triggers the scrollbar instead of clipping past the 280px envelope.
+  -- Defer one frame so FontString wrap heights settle after the SetText
+  -- calls above. GetTop/GetBottom return nil pre-layout; fall back to the
+  -- 280px envelope if that happens.
+  if C_Timer and C_Timer.After then
+    C_Timer.After(0, function()
+      if not detailPane or not detailPane.stats or not detailPane.stats.pipelineText then return end
+      local s = detailPane.stats
+      local statsTop = s:GetTop()
+      local lastBottom = s.pipelineText:GetBottom()
+      if statsTop and lastBottom then
+        local h = (statsTop - lastBottom) + 12
+        if h < 200 then h = 200 end
+        s:SetHeight(h)
+      end
+    end)
+  end
 end
 
 local function RenderBodyFlex(entry)
