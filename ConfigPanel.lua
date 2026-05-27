@@ -7,9 +7,10 @@ local function L(s) return s end
 -- BSP-009: GameTooltip helper for widget hover help. Mirrors HistoryPanel's
 -- AttachTooltip; duplicated locally because the two files are independent
 -- and a single shared module would require .toc load-order plumbing for
--- minor gain. Supports both native Frames/Buttons and AceGUI widgets via
--- .frame unwrap. EnableMouse is asserted because BackdropTemplate hosts
--- default mouse-disabled.
+-- minor gain. `widget.frame or widget` is a historical AceGUI compatibility
+-- fallback retained so any future widget wrapper that exposes `.frame` still
+-- works without a refactor. EnableMouse is asserted because BackdropTemplate
+-- hosts default mouse-disabled.
 local function AttachTooltip(widget, title, body, hint)
   if not widget then return end
   local host = widget.frame or widget
@@ -103,7 +104,9 @@ local embeddedMode
 local initialized
 local interfaceRegistered
 local popupsRegistered
-local aceWidgets = {}
+-- BSP-022: aceWidgets ringbuffer removed in Commit 3 (Slider/CheckBox went
+-- native then). MultiLineEditBox dialog went native in Commit 4. ConfigPanel
+-- no longer touches AceGUI at all; embed removal lands in Commit 5.
 local nativeChildren = {}
 local sectionStatus = {}
 local removedAllowlistEntry
@@ -140,13 +143,6 @@ local function Now()
     return GetServerTime()
   end
   return time()
-end
-
-local function EnsureAceGUI()
-  if not LibStub then
-    return nil
-  end
-  return LibStub("AceGUI-3.0", true)
 end
 
 local function GetSettings()
@@ -358,14 +354,6 @@ local function ReleaseNativeChild(child)
 end
 
 local function ReleaseContent()
-  local AceGUI = EnsureAceGUI()
-  if AceGUI then
-    for _, widget in ipairs(aceWidgets) do
-      AceGUI:Release(widget)
-    end
-  end
-  aceWidgets = {}
-
   for _, child in ipairs(nativeChildren) do
     ReleaseNativeChild(child)
   end
@@ -454,34 +442,161 @@ local function AddDisabledRow(label, value, y)
   return y - 36
 end
 
-local function AddAceWidget(widgetType, x, y, width)
-  local AceGUI = EnsureAceGUI()
-  if not AceGUI then
-    return nil
+-- BSP-022 Commit 2: native sliders, dual-path.
+-- Retail uses MinimalSliderWithSteppersTemplate (MWS) — the modern Settings-UI
+-- slider with stepper buttons on each end, matching the look of Edit Mode and
+-- Retail's Settings panels. Classic-family falls back to OptionsSliderTemplate
+-- (MCP-confirmed present in DeprecatedTemplates.xml on all 3 flavors, used by
+-- Classic's own Interface Options screens today). Both paths return a slider
+-- object exposing the same AceGUI-compatible facade so the call sites are
+-- identical regardless of flavor:
+--   SetLabel(text), SetSliderValues(min, max, step),
+--   SetValue(value), SetCallback("OnValueChanged", fn).
+--
+-- MWS-specific API reference (verified in Blizzard_SharedXML\Shared\Slider\
+-- MinimalSlider.lua): Init(value, minValue, maxValue, steps, formatters) takes
+-- `steps` as a count, not a step size — we compute steps = (max-min)/step.
+-- The formatter table is keyed by MinimalSliderWithSteppersMixin.Label.{Top,
+-- Min, Max} enum values; we use Top for "Label: value", Min/Max for range
+-- bounds. The OnValueChanged event is registered through CallbackRegistryMixin
+-- (RegisterCallback), not the native OnValueChanged script.
+local nextSliderId = 0
+
+local function MakeMWSSlider(x, y, width, label, minValue, maxValue, step)
+  local mws = TrackNative(CreateFrame("Frame", nil, content, "MinimalSliderWithSteppersTemplate"))
+  mws:SetSize(width or 280, 40)
+  mws:SetPoint("TOPLEFT", content, "TOPLEFT", x or CONTENT_PAD, y)
+
+  local labelText = label or ""
+
+  local function buildFormatters(minV, maxV)
+    return {
+      [MinimalSliderWithSteppersMixin.Label.Top] = function(v)
+        return string.format("%s: %d", labelText, math.floor((tonumber(v) or 0) + 0.5))
+      end,
+      [MinimalSliderWithSteppersMixin.Label.Min] = CreateMinimalSliderFormatter(
+        MinimalSliderWithSteppersMixin.Label.Min, tostring(minV)),
+      [MinimalSliderWithSteppersMixin.Label.Max] = CreateMinimalSliderFormatter(
+        MinimalSliderWithSteppersMixin.Label.Max, tostring(maxV)),
+    }
   end
 
-  local widget = AceGUI:Create(widgetType)
-  if not widget or not widget.frame then
-    return nil
+  local function reInit(value, minV, maxV, stepV)
+    local span = (maxV - minV)
+    local stepSize = stepV or 1
+    local steps = math.max(1, math.floor(span / stepSize + 0.5))
+    mws:Init(value, minV, maxV, steps, buildFormatters(minV, maxV))
   end
 
-  aceWidgets[#aceWidgets + 1] = widget
-  widget.frame:SetParent(content)
-  widget.frame:ClearAllPoints()
-  widget.frame:SetPoint("TOPLEFT", content, "TOPLEFT", x or CONTENT_PAD, y)
-  widget:SetWidth(width or 280)
-  widget.frame:Show()
-  return widget
+  -- Initial setup: caller's subsequent SetValue replaces the initial value.
+  reInit(minValue, minValue, maxValue, step)
+
+  local valueCb
+
+  function mws:SetLabel(text)
+    labelText = text or ""
+    -- Refresh the Top label so the new name appears immediately.
+    self:FormatValue(self.Slider:GetValue())
+  end
+  function mws:SetSliderValues(minV, maxV, stepV)
+    local v = self.Slider:GetValue()
+    if v < minV then v = minV end
+    if v > maxV then v = maxV end
+    reInit(v, minV, maxV, stepV)
+  end
+  -- mws:SetValue already exists from MinimalSliderWithSteppersMixin (line 169
+  -- of MinimalSlider.lua) — proxies to self.Slider:SetValue.
+  function mws:SetCallback(event, fn)
+    if event ~= "OnValueChanged" then return end
+    if valueCb then
+      -- Already registered the dispatch closure; just swap the user fn.
+      valueCb = fn
+      return
+    end
+    valueCb = fn
+    self:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged,
+      function(_, value)
+        if valueCb then valueCb(self, "OnValueChanged", value) end
+      end, self)
+  end
+
+  mws:Show()
+  return mws
+end
+
+local function MakeOptionsSlider(x, y, width, label, minValue, maxValue, step)
+  nextSliderId = nextSliderId + 1
+  local name = "BawrSpamConfigSlider" .. nextSliderId
+  local slider = TrackNative(CreateFrame("Slider", name, content, "OptionsSliderTemplate"))
+  slider:SetSize(width or 280, 17)
+  slider:SetPoint("TOPLEFT", content, "TOPLEFT", x or CONTENT_PAD, y)
+  slider:SetMinMaxValues(minValue, maxValue)
+  slider:SetValueStep(step or 1)
+  if slider.SetObeyStepOnDrag then
+    slider:SetObeyStepOnDrag(true)
+  end
+
+  -- OptionsSliderTemplate auto-creates these via $parent name resolution.
+  local textFS = _G[name .. "Text"]
+  local lowFS = _G[name .. "Low"]
+  local highFS = _G[name .. "High"]
+  if textFS then textFS:SetText(label or "") end
+  if lowFS then lowFS:SetText(tostring(minValue)) end
+  if highFS then highFS:SetText(tostring(maxValue)) end
+
+  -- Current-value readout below the slider; preserves the AceGUI visual
+  -- where the current value sat near the slider.
+  local valueFS = slider:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  valueFS:SetPoint("TOP", slider, "BOTTOM", 0, -2)
+
+  local callbacks = {}
+
+  function slider:SetLabel(text)
+    if textFS then textFS:SetText(text or "") end
+  end
+  function slider:SetSliderValues(minV, maxV, stepV)
+    slider:SetMinMaxValues(minV, maxV)
+    slider:SetValueStep(stepV or 1)
+    if lowFS then lowFS:SetText(tostring(minV)) end
+    if highFS then highFS:SetText(tostring(maxV)) end
+  end
+  -- Wrap native SetValue so the value readout updates even on initial set
+  -- (which happens before the OnValueChanged script binds the callback).
+  local nativeSetValue = slider.SetValue
+  function slider:SetValue(value)
+    nativeSetValue(slider, value)
+    valueFS:SetText(tostring(math.floor((tonumber(value) or 0) + 0.5)))
+  end
+  function slider:SetCallback(event, fn)
+    callbacks[event] = fn
+  end
+
+  slider:SetScript("OnValueChanged", function(self, value)
+    value = tonumber(value)
+    if value == nil then return end
+    valueFS:SetText(tostring(math.floor(value + 0.5)))
+    local fn = callbacks.OnValueChanged
+    if fn then fn(self, "OnValueChanged", value) end
+  end)
+
+  slider:Show()
+  return slider
+end
+
+local function MakeNativeSlider(x, y, width, label, minValue, maxValue, step)
+  if NS.Compat and NS.Compat.isClassicFamily then
+    return MakeOptionsSlider(x, y, width, label, minValue, maxValue, step)
+  end
+  -- Retail path: MWS. If the template is somehow missing at runtime, fall
+  -- back gracefully so the panel still renders.
+  if type(MinimalSliderWithSteppersMixin) ~= "table" then
+    return MakeOptionsSlider(x, y, width, label, minValue, maxValue, step)
+  end
+  return MakeMWSSlider(x, y, width, label, minValue, maxValue, step)
 end
 
 local function AddSlider(label, key, minValue, maxValue, step, y, tooltipBody)
-  local slider = AddAceWidget("Slider", CONTENT_PAD, y, 330)
-  if not slider then
-    return AddDisabledRow(label, "AceGUI unavailable", y)
-  end
-
-  slider:SetLabel(label)
-  slider:SetSliderValues(minValue, maxValue, step)
+  local slider = MakeNativeSlider(CONTENT_PAD, y, 330, label, minValue, maxValue, step)
   slider:SetValue(tonumber(SettingValue(key)) or tonumber(DEFAULT_SETTINGS[key]) or minValue)
   slider:SetCallback("OnValueChanged", function(_, _, value)
     value = ClampNumber(value, minValue, maxValue, DEFAULT_SETTINGS[key] or minValue)
@@ -494,23 +609,40 @@ local function AddSlider(label, key, minValue, maxValue, step, y, tooltipBody)
   return y - 48
 end
 
-local function AddCheckbox(label, key, y, onChanged, tooltipBody)
-  local checkbox = AddAceWidget("CheckBox", CONTENT_PAD, y, 360)
-  if not checkbox then
-    return AddDisabledRow(label, "AceGUI unavailable", y)
-  end
+-- BSP-022 Commit 3: native checkboxes via UICheckButtonTemplate.
+-- Universal template (works on all 3 flavors), so no flavor branch.
+-- The label is a FontString anchored to the right of the checkbox.
+-- The onChange callback receives a boolean (the new checked state).
+local function MakeNativeCheckbox(x, y, label, initialChecked, onChange, tooltipBody)
+  local cb = TrackNative(CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate"))
+  cb:SetSize(24, 24)
+  cb:SetPoint("TOPLEFT", content, "TOPLEFT", x or CONTENT_PAD, y)
+  cb:SetChecked(initialChecked and true or false)
 
-  checkbox:SetLabel(label)
-  checkbox:SetValue(SettingValue(key) == true)
-  checkbox:SetCallback("OnValueChanged", function(_, _, value)
-    value = value == true
+  local labelFS = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  labelFS:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+  labelFS:SetJustifyH("LEFT")
+  labelFS:SetText(label or "")
+
+  cb:SetScript("OnClick", function(self)
+    local value = self:GetChecked() and true or false
+    if onChange then onChange(value) end
+  end)
+
+  if tooltipBody then AttachTooltip(cb, label, tooltipBody) end
+
+  cb:Show()
+  return cb
+end
+
+local function AddCheckbox(label, key, y, onChanged, tooltipBody)
+  MakeNativeCheckbox(CONTENT_PAD, y, label, SettingValue(key) == true, function(value)
     if onChanged then
       onChanged(value)
     else
       SetSetting(key, value)
     end
-  end)
-  if tooltipBody then AttachTooltip(checkbox, label, tooltipBody) end
+  end, tooltipBody)
   return y - 32
 end
 
@@ -1055,18 +1187,47 @@ local function EnsureDialog()
   return dialogFrame
 end
 
-local function ShowTextDialog(title, text, primaryLabel, primaryHandler)
-  local AceGUI = EnsureAceGUI()
-  if not AceGUI then
-    Print("AceGUI-3.0 is missing; dialog unavailable.")
-    return
-  end
+-- BSP-022 Commit 4: native multiline edit for import/export/FP-fixture
+-- dialogs. Replaces AceGUI:Create("MultiLineEditBox") with a plain EditBox
+-- (SetMultiLine=true) hosted in a UIPanelScrollFrameTemplate ScrollFrame —
+-- the universal pattern present on all 3 flavors (verified in Classic Era
+-- via Blizzard_FrameXML\Classic\ClassTrainerFrameTemplates.xml:81).
+-- ScrollingEditBoxTemplate / InputScrollFrameTemplate are Retail-only and
+-- offer no real upside here over the universal composite.
+local function CreateNativeMultilineEdit(parent, leftInset, topInset, rightInset, bottomInset)
+  local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", leftInset, topInset)
+  -- -27 on the right reserves room for the scrollbar that ships with
+  -- UIPanelScrollFrameTemplate (template default scrollbar width).
+  scroll:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", rightInset - 27, bottomInset)
 
+  local edit = CreateFrame("EditBox", nil, scroll)
+  edit:SetMultiLine(true)
+  edit:SetAutoFocus(false)
+  edit:SetFontObject(ChatFontNormal)
+  edit:SetMaxLetters(0)
+  edit:SetWidth(scroll:GetWidth())
+  edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  -- Keep the EditBox width in sync with the scroll viewport on resize so
+  -- text wraps to the visible width and doesn't overflow horizontally.
+  scroll:SetScript("OnSizeChanged", function(self)
+    edit:SetWidth(self:GetWidth())
+  end)
+
+  scroll:SetScrollChild(edit)
+  scroll:Show()
+  edit:Show()
+
+  return edit, scroll
+end
+
+local function ShowTextDialog(title, text, primaryLabel, primaryHandler)
   local dialog = EnsureDialog()
-  if dialog.editWidget then
-    AceGUI:Release(dialog.editWidget)
-    dialog.editWidget = nil
-  end
+
+  -- Tear down a previous edit/scroll pair so consecutive ShowTextDialog calls
+  -- don't stack frames inside the dialog body.
+  if dialog.editFrame then dialog.editFrame:Hide() end
+  if dialog.editScroll then dialog.editScroll:Hide() end
 
   dialog.textValue = text or ""
   dialog.title:SetText(title)
@@ -1089,27 +1250,23 @@ local function ShowTextDialog(title, text, primaryLabel, primaryHandler)
   end)
   dialog.close:Hide()
 
-  local edit = AceGUI:Create("MultiLineEditBox")
-  dialog.editWidget = edit
-  edit:SetLabel("")
-  edit:SetNumLines(16)
-  edit:SetText(text or "")
-  edit:SetFullWidth(true)
-  edit:DisableButton(true)
-  edit:SetCallback("OnTextChanged", function(_, _, value)
-    dialog.textValue = value or ""
-  end)
-  edit.frame:SetParent(dialog)
-  edit.frame:ClearAllPoints()
-  edit.frame:SetPoint("TOPLEFT", dialog, "TOPLEFT", 16, -44)
-  edit.frame:SetPoint("BOTTOMRIGHT", dialog, "BOTTOMRIGHT", -16, 78)
-  edit.frame:Show()
+  -- Construct the edit lazily on first use; subsequent calls reuse it.
+  if not dialog.editFrame then
+    local edit, scroll = CreateNativeMultilineEdit(dialog, 16, -44, -16, 78)
+    edit:SetScript("OnTextChanged", function(self)
+      dialog.textValue = self:GetText() or ""
+    end)
+    dialog.editFrame = edit
+    dialog.editScroll = scroll
+  end
+
+  dialog.editScroll:Show()
+  dialog.editFrame:Show()
+  dialog.editFrame:SetText(text or "")
 
   dialog:Show()
-  if edit.editBox and edit.editBox.SetFocus then
-    edit.editBox:SetFocus()
-    edit.editBox:HighlightText()
-  end
+  dialog.editFrame:SetFocus()
+  dialog.editFrame:HighlightText()
 end
 
 local function RegisterStaticPopups()
@@ -1458,49 +1615,34 @@ RenderDetection = function()
   y = AddCheckbox("Use mixed-script detection", "mixedScriptEnabled", y, nil,
     "Enable Unicode-confusable script-mixing as a signal in scoring.")
 
-  -- BSP-010: Throttle controls. Cannot reuse AddSlider/AddCheckbox helpers
-  -- here because their SettingValue(key) reads are flat-keyed and these
-  -- live under settings.throttle.*. Inline via AddAceWidget directly,
-  -- matching the History section's max-entries-slider pattern.
+  -- BSP-010: Throttle controls. Cannot reuse AddCheckbox helper because its
+  -- SettingValue(key) read is flat-keyed and throttle.enabled lives under
+  -- settings.throttle.*. Use MakeNativeCheckbox directly with a custom
+  -- onChange that routes through NS.DB.SetThrottleEnabled.
   local throttle = (GetSettings() and GetSettings().throttle) or {}
 
-  local throttleCheckbox = AddAceWidget("CheckBox", CONTENT_PAD, y, 360)
-  if throttleCheckbox then
-    throttleCheckbox:SetLabel("Throttle confirmed-spam repeats")
-    throttleCheckbox:SetValue(throttle.enabled ~= false)
-    throttleCheckbox:SetCallback("OnValueChanged", function(_, _, value)
+  MakeNativeCheckbox(CONTENT_PAD, y, "Throttle confirmed-spam repeats",
+    throttle.enabled ~= false,
+    function(value)
       if NS.DB and NS.DB.SetThrottleEnabled then
-        NS.DB.SetThrottleEnabled(value == true)
+        NS.DB.SetThrottleEnabled(value)
       end
-    end)
-    AttachTooltip(throttleCheckbox, "Throttle confirmed-spam repeats",
-      "When the same cleansed text and sender GUID repeats inside the buffer window, " ..
-      "the second hit is auto-blocked. Only runs on messages already scored as spam \194\151 " ..
-      "legitimate repeats are unaffected.")
-    y = y - 32
-  else
-    y = AddDisabledRow("Throttle confirmed-spam repeats", "AceGUI unavailable", y)
-  end
+    end,
+    "When the same cleansed text and sender GUID repeats inside the buffer window, " ..
+    "the second hit is auto-blocked. Only runs on messages already scored as spam \194\151 " ..
+    "legitimate repeats are unaffected.")
+  y = y - 32
 
-  local throttleSlider = AddAceWidget("Slider", CONTENT_PAD, y, 330)
-  if throttleSlider then
-    throttleSlider:SetLabel("Throttle buffer size")
-    throttleSlider:SetSliderValues(5, 50, 1)
-    throttleSlider:SetValue(tonumber(throttle.bufferSize) or 20)
-    throttleSlider:SetCallback("OnValueChanged", function(_, _, value)
-      if NS.DB and NS.DB.SetThrottleBufferSize then
-        NS.DB.SetThrottleBufferSize(math.floor((tonumber(value) or 20) + 0.5))
-      end
-    end)
-    AttachTooltip(throttleSlider, "Throttle buffer size",
-      "How many recent confirmed-spam messages per surface are remembered for dedupe. " ..
-      "Larger = longer memory window. Range 5\194\17750.")
-  else
-    -- Slider is the last control in RenderDetection; y is unused after this.
-    -- Skip the `y =` assignment that the checkbox's else branch has, since
-    -- assigning here would trigger luacheck's "value assigned but unused" warning.
-    AddDisabledRow("Throttle buffer size", "AceGUI unavailable", y)
-  end
+  local throttleSlider = MakeNativeSlider(CONTENT_PAD, y, 330, "Throttle buffer size", 5, 50, 1)
+  throttleSlider:SetValue(tonumber(throttle.bufferSize) or 20)
+  throttleSlider:SetCallback("OnValueChanged", function(_, _, value)
+    if NS.DB and NS.DB.SetThrottleBufferSize then
+      NS.DB.SetThrottleBufferSize(math.floor((tonumber(value) or 20) + 0.5))
+    end
+  end)
+  AttachTooltip(throttleSlider, "Throttle buffer size",
+    "How many recent confirmed-spam messages per surface are remembered for dedupe. " ..
+    "Larger = longer memory window. Range 5\194\17750.")
 end
 
 RenderCategories = function()
@@ -1734,76 +1876,64 @@ RenderHistory = function()
     "GameFontNormalSmall", CONTENT_PAD, y)
   y = y - 28
 
-  local slider = AddAceWidget("Slider", CONTENT_PAD, y, 360)
-  if slider then
-    slider:SetLabel("Maximum history entries")
-    slider:SetSliderValues(100, 5000, 100)
-    slider:SetValue(tonumber(SettingValue("historyMaxEntries")) or DEFAULT_SETTINGS.historyMaxEntries)
-    slider:SetCallback("OnValueChanged", function(_, _, value)
-      value = ClampNumber(value, 100, 5000, DEFAULT_SETTINGS.historyMaxEntries)
-      value = math.floor((value + 50) / 100) * 100
-      -- BSP-050 Argus nit: the per-char cap applies to every character on commit
-      -- (via TrimAllCharacters), so the popup must fire when *any* char would be
-      -- trimmed, not just the current one. Mirror the global slider's cross-char
-      -- iteration at lines below, but track the *max* single-char length rather
-      -- than the sum.
-      local maxLen = 0
-      if NS.DB and NS.DB.db and NS.DB.db.sv and type(NS.DB.db.sv.char) == "table" then
-        for _, charData in pairs(NS.DB.db.sv.char) do
-          if type(charData) == "table" and type(charData.history) == "table" then
-            if #charData.history > maxLen then maxLen = #charData.history end
-          end
+  local slider = MakeNativeSlider(CONTENT_PAD, y, 360, "Maximum history entries", 100, 5000, 100)
+  slider:SetValue(tonumber(SettingValue("historyMaxEntries")) or DEFAULT_SETTINGS.historyMaxEntries)
+  slider:SetCallback("OnValueChanged", function(_, _, value)
+    value = ClampNumber(value, 100, 5000, DEFAULT_SETTINGS.historyMaxEntries)
+    value = math.floor((value + 50) / 100) * 100
+    -- BSP-050 Argus nit: the per-char cap applies to every character on commit
+    -- (via TrimAllCharacters), so the popup must fire when *any* char would be
+    -- trimmed, not just the current one. Mirror the global slider's cross-char
+    -- iteration at lines below, but track the *max* single-char length rather
+    -- than the sum.
+    local maxLen = 0
+    if NS.DB and NS.DB.db and NS.DB.db.sv and type(NS.DB.db.sv.char) == "table" then
+      for _, charData in pairs(NS.DB.db.sv.char) do
+        if type(charData) == "table" and type(charData.history) == "table" then
+          if #charData.history > maxLen then maxLen = #charData.history end
         end
       end
-      if value < maxLen then
-        pendingHistoryMax = value
-        if StaticPopup_Show then
-          StaticPopup_Show("BAWRSPAM_TRIM_HISTORY")
-        end
-      else
-        SetSetting("historyMaxEntries", value)
+    end
+    if value < maxLen then
+      pendingHistoryMax = value
+      if StaticPopup_Show then
+        StaticPopup_Show("BAWRSPAM_TRIM_HISTORY")
       end
-    end)
-    AttachTooltip(slider, "Maximum history entries",
-      "Cap retained History at this many entries. Oldest entries are trimmed first. " ..
-      "Lifetime stats counters are unaffected.")
-    y = y - 52
-  else
-    y = AddDisabledRow("Maximum history entries", "AceGUI unavailable", y)
-  end
+    else
+      SetSetting("historyMaxEntries", value)
+    end
+  end)
+  AttachTooltip(slider, "Maximum history entries",
+    "Cap retained History at this many entries. Oldest entries are trimmed first. " ..
+    "Lifetime stats counters are unaffected.")
+  y = y - 52
 
-  local globalSlider = AddAceWidget("Slider", CONTENT_PAD, y, 360)
-  if globalSlider then
-    globalSlider:SetLabel("Account total")
-    globalSlider:SetSliderValues(100, 5000, 100)
-    globalSlider:SetValue(tonumber(SettingValue("historyGlobalMaxEntries")) or DEFAULT_SETTINGS.historyGlobalMaxEntries)
-    globalSlider:SetCallback("OnValueChanged", function(_, _, value)
-      value = ClampNumber(value, 100, 5000, DEFAULT_SETTINGS.historyGlobalMaxEntries)
-      value = math.floor((value + 50) / 100) * 100
-      local total = 0
-      if NS.DB and NS.DB.db and NS.DB.db.sv and type(NS.DB.db.sv.char) == "table" then
-        for _, charData in pairs(NS.DB.db.sv.char) do
-          if type(charData) == "table" and type(charData.history) == "table" then
-            total = total + #charData.history
-          end
+  local globalSlider = MakeNativeSlider(CONTENT_PAD, y, 360, "Account total", 100, 5000, 100)
+  globalSlider:SetValue(tonumber(SettingValue("historyGlobalMaxEntries")) or DEFAULT_SETTINGS.historyGlobalMaxEntries)
+  globalSlider:SetCallback("OnValueChanged", function(_, _, value)
+    value = ClampNumber(value, 100, 5000, DEFAULT_SETTINGS.historyGlobalMaxEntries)
+    value = math.floor((value + 50) / 100) * 100
+    local total = 0
+    if NS.DB and NS.DB.db and NS.DB.db.sv and type(NS.DB.db.sv.char) == "table" then
+      for _, charData in pairs(NS.DB.db.sv.char) do
+        if type(charData) == "table" and type(charData.history) == "table" then
+          total = total + #charData.history
         end
       end
-      if value < total then
-        pendingHistoryGlobalMax = value
-        if StaticPopup_Show then
-          StaticPopup_Show("BAWRSPAM_TRIM_HISTORY_GLOBAL")
-        end
-      else
-        SetSetting("historyGlobalMaxEntries", value)
+    end
+    if value < total then
+      pendingHistoryGlobalMax = value
+      if StaticPopup_Show then
+        StaticPopup_Show("BAWRSPAM_TRIM_HISTORY_GLOBAL")
       end
-    end)
-    AttachTooltip(globalSlider, "Account total",
-      "Maximum spam-history records retained across all characters combined. " ..
-      "Lowering this trims oldest records account-wide on next login.")
-    y = y - 52
-  else
-    y = AddDisabledRow("Account total", "AceGUI unavailable", y)
-  end
+    else
+      SetSetting("historyGlobalMaxEntries", value)
+    end
+  end)
+  AttachTooltip(globalSlider, "Account total",
+    "Maximum spam-history records retained across all characters combined. " ..
+    "Lowering this trims oldest records account-wide on next login.")
+  y = y - 52
 
   AddNativeButton("Clear History", CONTENT_PAD, y, 120, ConfigPanel.ConfirmClearHistory,
     "Delete all retained History entries. Lifetime stats counters are preserved. Confirmation required.")
@@ -1866,8 +1996,40 @@ local RENDERERS = {
   Dev = RenderDev,
 }
 
-local function CreateBackdropFrame(parent)
-  local f = CreateFrame("Frame", "BawrSpamConfigFrame", parent, "BackdropTemplate")
+-- BSP-022 Commit 1: dual-path chrome. PortraitFrameTemplate and
+-- ButtonFrameTemplateNoPortrait are Retail-only (MCP-confirmed: not in
+-- Classic Era 1.15 or Pandaria Classic 5.5), so Classic-family falls back to
+-- a manual BackdropTemplate shell. Embed mode (parent != nil) always uses a
+-- plain Frame regardless of flavor so it nests inside HistoryPanel's Config
+-- tab without portrait/border collision. Mirrors HistoryPanel's BSP-008
+-- pattern (CreatePlainHistoryFrame / CreateHistoryFrame / CreateBackdropFrame).
+local function HidePortraitChrome(f)
+  if not f then return end
+  local frameName = f.GetName and f:GetName() or nil
+  local pieces = {
+    f.PortraitContainer,
+    f.Portrait,
+    f.portrait,
+    f.portraitFrame,
+    frameName and _G[frameName .. "PortraitContainer"] or nil,
+    frameName and _G[frameName .. "Portrait"] or nil,
+    frameName and _G[frameName .. "PortraitFrame"] or nil,
+  }
+  for _, piece in ipairs(pieces) do
+    if piece and piece.Hide then
+      piece:Hide()
+      if piece.SetAlpha then
+        piece:SetAlpha(0)
+      end
+    end
+  end
+end
+
+local function CreatePlainConfigFrame(parent)
+  local ok, f = pcall(CreateFrame, "Frame", "BawrSpamConfigFrame", parent, "BackdropTemplate")
+  if not ok or not f then
+    f = CreateFrame("Frame", "BawrSpamConfigFrame", parent)
+  end
   if f.SetBackdrop then
     f:SetBackdrop({
       bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
@@ -1880,36 +2042,80 @@ local function CreateBackdropFrame(parent)
     f:SetBackdropColor(0.02, 0.02, 0.025, 0.96)
     f:SetBackdropBorderColor(0.35, 0.36, 0.42, 1)
   end
+
+  local header = CreateFrame("Frame", nil, f)
+  header:SetHeight(28)
+  header:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -6)
+  header:SetPoint("TOPRIGHT", f, "TOPRIGHT", -30, -6)
+  header:EnableMouse(true)
+  header:RegisterForDrag("LeftButton")
+  header:SetScript("OnDragStart", function() f:StartMoving() end)
+  header:SetScript("OnDragStop", function()
+    f:StopMovingOrSizing()
+    SavePosition()
+  end)
+
+  header.TitleText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  header.TitleText:SetPoint("CENTER", header, "CENTER", 0, 0)
+  header.TitleText:SetText(L("BawrSpam \226\128\148 Config"))
+  f.TitleContainer = header
+
+  local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, -2)
+  close:SetScript("OnClick", function() f:Hide() end)
+  f.CloseButton = close
+
+  return f
+end
+
+local function CreatePortraitConfigFrame(parent)
+  local template = "PortraitFrameTemplate"
+  local ok, f = pcall(CreateFrame, "Frame", "BawrSpamConfigFrame", parent, template)
+  if ok and f then
+    return f
+  end
+  -- Defensive fallback if Blizzard ever removes PortraitFrameTemplate from a
+  -- future Retail interface revision: drop the template and let ApplyConfigChrome's
+  -- method-existence guards no-op the Portrait-specific work. The frame name is
+  -- preserved so UISpecialFrames + external addon-manager lookups still resolve.
+  return CreateFrame("Frame", "BawrSpamConfigFrame", parent)
+end
+
+local function CreateConfigFrame(parent)
+  if NS.Compat and NS.Compat.isClassicFamily then
+    return CreatePlainConfigFrame(parent)
+  end
+  return CreatePortraitConfigFrame(parent)
+end
+
+-- Post-processor: applies PortraitFrameTemplate-specific customization
+-- (layout, portrait hide, title set, title centering). No-op on the Plain
+-- path because every method is method-existence-guarded; the Plain path
+-- already wires title + close button inline in CreatePlainConfigFrame.
+local function ApplyConfigChrome(f)
+  f.layoutType = "ButtonFrameTemplateNoPortrait"
+  if f.SetBorder then
+    f:SetBorder("ButtonFrameTemplateNoPortrait")
+  end
+  if f.SetPortraitShown then
+    f:SetPortraitShown(false)
+  end
+  HidePortraitChrome(f)
+  if f.SetTitle then
+    f:SetTitle(L("BawrSpam \226\128\148 Config"))
+  elseif f.TitleContainer and f.TitleContainer.TitleText then
+    f.TitleContainer.TitleText:SetText(L("BawrSpam \226\128\148 Config"))
+  end
+  -- Center the title within TitleContainer (PortraitFrameTemplate default
+  -- is LEFT-anchored; Plain path already centers, so this is a no-op there).
+  if f.TitleContainer and f.TitleContainer.TitleText then
+    f.TitleContainer.TitleText:ClearAllPoints()
+    f.TitleContainer.TitleText:SetPoint("CENTER", f.TitleContainer, "CENTER", 0, 0)
+  end
   f:SetFrameStrata("HIGH")
   f:SetClampedToScreen(true)
   f:Hide()
   return f
-end
-
-local function CreateHeaderBar(parent)
-  local header = CreateFrame("Frame", nil, parent)
-  header:SetHeight(28)
-  header:SetPoint("TOPLEFT", parent, "TOPLEFT", 6, -6)
-  header:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -6, -6)
-  header:EnableMouse(true)
-  header:RegisterForDrag("LeftButton")
-  header:SetScript("OnDragStart", function()
-    parent:StartMoving()
-  end)
-  header:SetScript("OnDragStop", function()
-    parent:StopMovingOrSizing()
-    SavePosition()
-  end)
-
-  local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-  title:SetPoint("LEFT", header, "LEFT", 4, 0)
-  title:SetText("BawrSpam - Config")
-
-  local close = CreateFrame("Button", nil, parent, "UIPanelCloseButton")
-  close:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 2, -2)
-  close:SetScript("OnClick", function()
-    parent:Hide()
-  end)
 end
 
 local function CreateResizeHandle(parent)
@@ -1968,6 +2174,12 @@ local function CreateNav(parent)
   end
 end
 
+-- BSP-022 / Argus N2: ConfigPanel.Open routes through HistoryPanel.ShowConfig
+-- when HistoryPanel is loaded (the normal case), which always calls Attach()
+-- and hits the embed-mode branch below. The standalone-no-parent branch is a
+-- defensive fallback for the case where HistoryPanel.ShowConfig is missing.
+-- New ConfigPanel callers should still pass through ConfigPanel.Open and let
+-- this routing layer pick the right mode.
 local function BuildFrame(parent)
   local embedded = parent ~= nil
   if frame then
@@ -1981,18 +2193,23 @@ local function BuildFrame(parent)
   end
 
   if embedded then
+    -- Embed mode: plain Frame, no chrome. HistoryPanel's Config tab owns
+    -- the chrome; we just provide content inside its host frame.
     frame = CreateFrame("Frame", "BawrSpamConfigFrame", parent)
     frame:SetAllPoints(parent)
     embeddedMode = true
   else
-    frame = CreateBackdropFrame(UIParent)
+    -- Standalone: dispatcher picks PortraitFrameTemplate (Retail) or the
+    -- Plain BackdropTemplate shell (Classic-family). ApplyConfigChrome
+    -- handles Portrait-specific customization on Retail; method-existence
+    -- guards make it a no-op on Plain.
+    frame = CreateConfigFrame(UIParent)
+    ApplyConfigChrome(frame)
     frame:SetMovable(true)
     frame:SetResizable(true)
     if frame.SetResizeBounds then
       frame:SetResizeBounds(MIN_WIDTH, MIN_HEIGHT)
     end
-
-    CreateHeaderBar(frame)
     CreateResizeHandle(frame)
   end
   CreateNav(frame)
@@ -2030,9 +2247,6 @@ function ConfigPanel.Initialize()
   initialized = true
   RegisterStaticPopups()
   RegisterInterfaceOptions()
-  if not EnsureAceGUI() then
-    DevLog("AceGUI-3.0 is missing; ConfigPanel will show limited controls.")
-  end
 end
 
 function ConfigPanel.Open(section)

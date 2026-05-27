@@ -23,13 +23,6 @@ BawrSpam vendors a small set of WoW Lua libraries to avoid a fetch step at insta
 - **Purpose:** SavedVariables wrapper providing `global` / `profile` / `char` scopes, defaults, and migration hooks.
 - **Vendored at:** BSP-002 (DB layer)
 
-## AceGUI-3.0
-
-- **Source:** https://www.wowace.com/projects/ace3
-- **License:** All Rights Reserved per upstream `.toc` — explicit permission to use, modify, fork, and redistribute with WoW addons (standard WowAce vendoring permission)
-- **Purpose:** Widget toolkit (containers + controls) used inside the custom `HistoryPanel` frame for filter dropdowns, checkboxes, edit boxes, and labels.
-- **Vendored at:** BSP-003 (HistoryPanel)
-
 ## LibDataBroker-1.1
 
 - **Source:** https://github.com/tekkub/libdatabroker-1-1
@@ -50,10 +43,10 @@ BawrSpam vendors a small set of WoW Lua libraries to avoid a fetch step at insta
 - No modifications. Spot-check on initial vendor showed no studio-specific patches.
 - Updates: re-vendor from WowAce when the upstream lib publishes a relevant fix. Track in `BawrSpam_Dev/BSpam_Tracker.md`.
 
-## Libraries deferred to later plans
+## Libraries removed at BSP-022
 
-| Library | Required by | Will vendor when |
+| Library | Removed when | Reason |
 |---|---|---|
-| AceConfig-3.0 (optional) | BSP-004 ConfigPanel — only if not custom-AceGUI | BSP-004 implementation start |
+| AceGUI-3.0 | BSP-022 | ConfigPanel fully native (MinimalSliderWithSteppersTemplate / OptionsSliderTemplate / UICheckButtonTemplate / native multiLine EditBox in UIPanelScrollFrameTemplate). |
 
 WagoAnalytics is intentionally NOT vendored (no telemetry in v1 personal-use).
