@@ -1429,22 +1429,19 @@ local function RegisterInterfaceOptions()
   button:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -18)
   button:SetText("Open BawrSpam Config...")
   button:SetScript("OnClick", function()
-    local settingsPanel = _G["SettingsPanel"]
-    if settingsPanel and settingsPanel.Close then
-      pcall(settingsPanel.Close, settingsPanel)
-    end
-    local cancel = _G["InterfaceOptionsFrameCancel"]
-    if cancel and cancel.Click then
-      pcall(cancel.Click, cancel)
-    end
-    -- BSP-055 fix #12: defer ConfigPanel.Open by one frame so the secure
-    -- execution context unwinds before we create the BawrSpam frame.
-    -- Without this, the OnClick chain (secure Settings button → addon
-    -- handler → SettingsPanel:Close → ConfigPanel.Open) leaves a
-    -- secure-tainted breadcrumb that fires the "BawrSpam has been blocked
-    -- from an action only available to the Blizzard UI" warning when our
-    -- frame tries to register against UISpecialFrames. C_Timer.After(0)
-    -- queues the open onto the next OnUpdate tick, which is non-secure.
+    -- BSP-055 Gate 2 followup: don't try to dismiss the Settings panel
+    -- from addon code. The previous pcall(SettingsPanel.Close, ...) +
+    -- pcall(InterfaceOptionsFrameCancel.Click, ...) approach triggered
+    -- ADDON_ACTION_FORBIDDEN — SettingsPanel:Close routes through
+    -- ExitWithCommit → TransitionBackOpeningPanel → ToggleGameMenu →
+    -- SpellStopCasting (a protected function). pcall catches Lua errors
+    -- but not taint warnings, so BugGrabber surfaces the warning to the
+    -- player. Leaving Settings open also matches how most modern addons
+    -- handle their Settings launcher — Esc dismisses Settings, our panel
+    -- comes up on top via the C_Timer defer below.
+    --
+    -- C_Timer.After(0) is preserved from the prior commit so any residual
+    -- secure-context taint unwinds before our frame creation runs.
     if C_Timer and C_Timer.After then
       C_Timer.After(0, ConfigPanel.Open)
     else
