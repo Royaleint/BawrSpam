@@ -29,18 +29,26 @@ local function AttachTooltip(widget, title, body, hint)
   end)
 end
 
-local DEFAULT_PANEL_WIDTH  = 820
-local DEFAULT_PANEL_HEIGHT = 540
-local MIN_PANEL_WIDTH      = 720
-local MIN_PANEL_HEIGHT     = 500
+-- BSP-055 Gate 2 followup-v2: HistoryPanel is now a fixed-size window
+-- (940 x 560). Min == default; SetResizable is removed. This eliminates
+-- the legend-overflow-at-narrow-listPane and tile-label-clip-at-narrow-
+-- detailPane edge cases from BSP-022 / BSP-055 Gate 2 because the panel
+-- can never reach a width where those elements don't fit. The splitter
+-- still lets the user nudge the list/detail proportion within the
+-- locked outer size (~20 px range given current pane minimums).
+local FIXED_PANEL_WIDTH    = 940
+local FIXED_PANEL_HEIGHT   = 560
 
 local LIST_ROW_HEIGHT  = 26
 local SCROLLBAR_GUTTER = 22
 local LIST_MAX_ROWS    = 40
 
-local MIN_LIST_PANE_WIDTH   = 240
-local MIN_DETAIL_PANE_WIDTH = 360
-local DEFAULT_LIST_PANE_WIDTH = 380
+-- Pane minimums tightened so the splitter cannot drag either pane below
+-- the width where its content (legend strip on listPane, DETECTION STATS
+-- tile labels on detailPane) would clip.
+local MIN_LIST_PANE_WIDTH   = 420
+local MIN_DETAIL_PANE_WIDTH = 480
+local DEFAULT_LIST_PANE_WIDTH = 440
 local SPLITTER_WIDTH = 4
 
 local CATEGORY_COLORS = {
@@ -186,7 +194,6 @@ local listPane
 local detailPane
 local pauseRow
 local pausePills
-local sizeDirty
 local minimapLDB
 local minimapOptions
 local filterState
@@ -244,23 +251,16 @@ local function SavePosition()
   store.y = frame:GetTop()
 end
 
-local function SaveSize()
-  if not frame then return end
-  local store = GetCharStore()
-  if not store then return end
-  store.width  = frame:GetWidth()
-  store.height = frame:GetHeight()
-  sizeDirty = false
-end
+-- BSP-055 Gate 2 followup-v2: SaveSize removed — panel is fixed-size and
+-- the width/height SavedVariables keys are no longer written. ApplyStoredGeometry
+-- still reads position (store.x / store.y) but the size is forced to the
+-- compile-time constants. Existing users with store.width / store.height set
+-- by older builds get their values ignored on next open — harmless.
 
 local function ApplyStoredGeometry()
   local store = GetCharStore() or {}
 
-  local width  = store.width  or DEFAULT_PANEL_WIDTH
-  local height = store.height or DEFAULT_PANEL_HEIGHT
-  if width  < MIN_PANEL_WIDTH  then width  = MIN_PANEL_WIDTH  end
-  if height < MIN_PANEL_HEIGHT then height = MIN_PANEL_HEIGHT end
-  frame:SetSize(width, height)
+  frame:SetSize(FIXED_PANEL_WIDTH, FIXED_PANEL_HEIGHT)
 
   frame:ClearAllPoints()
   if store.x and store.y then
@@ -285,8 +285,10 @@ local function ClearStoredGeometry()
 	if not store then return end
 	store.x = nil
 	store.y = nil
-	store.width = nil
-	store.height = nil
+	-- store.width / store.height intentionally not cleared here — the keys
+	-- may still be present from older builds but ApplyStoredGeometry ignores
+	-- them. Leaving them allows a future bump back to resizable without a
+	-- data migration.
 end
 
 local function HidePortraitChrome(f)
@@ -394,23 +396,7 @@ local function OpenConfigPanel()
   HistoryPanel.ShowConfig("Detection")
 end
 
-local function CreateResizeHandle(parent)
-  local handle = CreateFrame("Button", nil, parent)
-  handle:SetSize(16, 16)
-  handle:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -4, 4)
-  handle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
-  handle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
-  handle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-  handle:SetScript("OnMouseDown", function() parent:StartSizing("BOTTOMRIGHT") end)
-  handle:SetScript("OnMouseUp",   function()
-    parent:StopMovingOrSizing()
-    sizeDirty = true
-  end)
-  AttachTooltip(handle, "Resize panel",
-    "Drag to resize the History panel.",
-    "Minimum size: 720 \195\151 500.")
-  return handle
-end
+-- BSP-055 Gate 2 followup-v2: resize handle removed — panel is fixed-size.
 
 local function CreatePanes(parent)
   local listWidth = GetStoredListPaneWidth()
@@ -2060,24 +2046,11 @@ local function CreateHeaderFilters()
   frame.filterChipsBand = chipsBand
 end
 
-local function ClampPanes(parent)
-  if not listPane or not detailPane or not parent then return end
-  local parentWidth = parent:GetWidth()
-  if not parentWidth or parentWidth <= 0 then return end
-  local maxList = parentWidth - SPLITTER_WIDTH - MIN_DETAIL_PANE_WIDTH - 16
-  -- 16 = left margin 6 + post-splitter gap 4 + right margin 6
-  local currentList = listPane:GetWidth()
-  local clamped = currentList
-  if clamped < MIN_LIST_PANE_WIDTH then clamped = MIN_LIST_PANE_WIDTH end
-  if clamped > maxList then clamped = maxList end
-  if clamped < MIN_LIST_PANE_WIDTH then clamped = MIN_LIST_PANE_WIDTH end
-  if clamped ~= currentList then
-    listPane:SetWidth(clamped)
-  end
-  detailPane:ClearAllPoints()
-  detailPane:SetPoint("TOPLEFT",     parent, "TOPLEFT",     6 + clamped + SPLITTER_WIDTH + 4, -86)
-  detailPane:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -6, 40)
-end
+-- BSP-055 Gate 2 followup-v2: ClampPanes removed. It existed to re-clamp the
+-- list/detail proportion when the user resized the panel; with the panel
+-- now fixed-size, the only thing that moves the splitter is the user's
+-- mouse drag, and that handler does its own MIN_LIST_PANE_WIDTH /
+-- MIN_DETAIL_PANE_WIDTH bounds checks inline (see CreateSplitter OnUpdate).
 
 local function CreateSplitter(parent)
   local splitter = CreateFrame("Button", nil, parent)
@@ -2296,10 +2269,9 @@ local function BuildFrame()
 
   frame = CreateBackdropFrame(UIParent)
   frame:SetMovable(true)
-  frame:SetResizable(true)
-  if frame.SetResizeBounds then
-    frame:SetResizeBounds(MIN_PANEL_WIDTH, MIN_PANEL_HEIGHT)
-  end
+  -- BSP-055 Gate 2 followup-v2: fixed-size panel. SetResizable / SetResizeBounds
+  -- removed; the resize handle is no longer constructed. The panel can still
+  -- be moved by dragging the title bar.
 
   -- Title-bar drag — TitleContainer is the modern drag region.
   if frame.TitleContainer then
@@ -2312,7 +2284,6 @@ local function BuildFrame()
     end)
   end
 
-  CreateResizeHandle(frame)
   CreatePauseRow(frame)
   if HistoryPanel.RefreshPauseRow then HistoryPanel.RefreshPauseRow() end
   listPane, detailPane = CreatePanes(frame)
@@ -2328,18 +2299,11 @@ local function BuildFrame()
   CreateTabStrip(frame)
   UpdateSenderFilterChip()
 
-  frame:SetScript("OnSizeChanged", function()
-    sizeDirty = true
-    ClampPanes(frame)
-    if listPane and listPane.scroll and listPane.scroll.FullUpdate then
-      listPane.scroll:FullUpdate()
-    elseif RefreshList then
-      RefreshList()
-    end
-  end)
-  frame:SetScript("OnHide", function()
-    if sizeDirty then SaveSize() end
-  end)
+  -- BSP-055 Gate 2 followup-v2: no OnSizeChanged / OnHide-SaveSize wiring.
+  -- The panel is fixed-size so it never resizes after ApplyStoredGeometry;
+  -- ClampPanes (still called from the splitter drag handler) keeps the
+  -- list/detail proportion within MIN_LIST_PANE_WIDTH..MIN_DETAIL_PANE_WIDTH
+  -- bounds derived from the fixed panel width.
 
   ApplyStoredGeometry()
   tinsert(UISpecialFrames, "BawrSpamHistoryFrame")
@@ -2447,12 +2411,14 @@ function HistoryPanel.IsShown()
 end
 
 function HistoryPanel.ResetPosition()
+	-- BSP-055 Gate 2 followup-v2: panel is fixed-size. Reset clears the
+	-- stored position only and recenters; size is always FIXED_PANEL_WIDTH x
+	-- FIXED_PANEL_HEIGHT regardless of any older width/height in the store.
 	ClearStoredGeometry()
 	if frame then
-		frame:SetSize(DEFAULT_PANEL_WIDTH, DEFAULT_PANEL_HEIGHT)
+		frame:SetSize(FIXED_PANEL_WIDTH, FIXED_PANEL_HEIGHT)
 		frame:ClearAllPoints()
 		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-		SaveSize()
 	end
 end
 
