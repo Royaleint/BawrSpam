@@ -2,10 +2,10 @@
 
 ## v1.1.2 (2026-05-26)
 
-- Config panel rebuilt on native Blizzard widgets; smaller install footprint.
-- History window opens at a consistent fixed size.
-- Settings panel "Open BawrSpam Config" button works cleanly again.
-- History detail-pane layout fixes.
+- Rebuilt the Config panel on native Blizzard widgets.
+- Set the History window to a fixed size for consistent layout.
+- Fixed the Settings panel "Open BawrSpam Config" button.
+- Fixed several History detail-pane layout issues.
 
 ## v1.1.1 (2026-05-21)
 
