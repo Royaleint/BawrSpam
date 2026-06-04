@@ -1,8 +1,15 @@
 local ADDON_NAME, NS = ...
 
 -- Foundry-1.0 is a hard dependency (## Dependencies: Foundry-1.0), so it is loaded
--- before BawrSpam and _G.Foundry_1_0 is bound (same pattern as LFGScanner.lua:2).
+-- before BawrSpam and _G.Foundry_1_0 is bound. Guard at file load (mirrors
+-- Homestead's Lifecycle bind): a nil F means Foundry failed to set its global, so
+-- the bootstrap below (which now hard-needs F.Lifecycle) fails loud with a clear
+-- message rather than an opaque nil-index at the :New call. The hard dependency
+-- makes this unreachable in a healthy install; it is the broken-Foundry guard.
 local F = _G.Foundry_1_0
+if not F then
+  error("BawrSpam requires Foundry-1.0. Please install or enable it.")
+end
 
 local initialized = false
 
