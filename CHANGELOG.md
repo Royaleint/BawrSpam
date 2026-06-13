@@ -1,5 +1,11 @@
 # BawrSpam Changelog
 
+## v1.2.0 (2026-06-13)
+
+- Updated internal data storage to Foundry.DB (SavedVariables format unchanged — no data loss on upgrade).
+- Retired LFG channel filtering surface.
+- Foundry-1.0 is now bundled so BawrSpam works without a separate Foundry install.
+
 ## v1.1.2 (2026-05-26)
 
 - Rebuilt the Config panel on native Blizzard widgets.
