@@ -8,6 +8,13 @@ local function Detect(env)
   local isRetail = projectID ~= nil and projectID == env.WOW_PROJECT_MAINLINE
   local isClassicEra = projectID ~= nil and projectID == env.WOW_PROJECT_CLASSIC
   local isTBCAnniversary = projectID ~= nil and projectID == env.WOW_PROJECT_BURNING_CRUSADE_CLASSIC
+  -- Mists of Pandaria Classic (5.5.x) runs on the modern engine: it ships the
+  -- ScrollBox suite, PortraitFrameTemplate, and the modern Settings API, so it
+  -- takes the modern UI path and is deliberately NOT folded into isClassicFamily
+  -- (which selects the reduced FauxScroll / plain-chrome / color-glyph
+  -- fallbacks). Verified in-game on 5.5.x — the modern History panel renders
+  -- correctly. (BSP-065)
+  local isMistsClassic = projectID ~= nil and projectID == env.WOW_PROJECT_MISTS_CLASSIC
   local isClassicFamily = isClassicEra or isTBCAnniversary
 
   local hasModernHistoryList =
@@ -33,6 +40,7 @@ local function Detect(env)
     isRetail = isRetail,
     isClassicEra = isClassicEra,
     isTBCAnniversary = isTBCAnniversary,
+    isMistsClassic = isMistsClassic,
     isClassicFamily = isClassicFamily,
     hasModernHistoryList = hasModernHistoryList,
     hasClassicHistoryList = hasClassicHistoryList,
