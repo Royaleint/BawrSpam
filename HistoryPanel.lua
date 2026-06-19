@@ -1206,7 +1206,7 @@ RefreshDetail = function()
 end
 
 RefreshList = function()
-  if not listPane or not listPane.scroll then return end
+  if not listPane or not listPane.listBackend then return end
 
   local allEntries = GetEntries() or {}
   currentEntriesSnapshot = allEntries
@@ -1245,7 +1245,7 @@ RefreshList = function()
       end
     end
   else
-    local provider = listPane.scroll:GetDataProvider()
+    local provider = listPane.list:GetNativeHandles().dataProvider
     provider:Flush()
     provider:InsertTable(filtered)
   end
@@ -1262,10 +1262,10 @@ SelectEntry = function(id)
     return
   end
   -- Update the existing-selection visual on rendered rows without rebuilding
-  -- the data provider (which would reset scroll). The ScrollBox's
-  -- ForEachFrame iterates current visible rows.
-  if listPane and listPane.scroll and listPane.scroll.ForEachFrame then
-    listPane.scroll:ForEachFrame(function(rowFrame, entryData)
+  -- the data provider (which would reset scroll). Route through the controller
+  -- so the abstraction is respected and Destroy() remains reachable.
+  if listPane and listPane.list then
+    listPane.list:ForEachFrame(function(rowFrame, entryData)
       if rowFrame.selection then
         rowFrame.selection:SetShown(selectedEntryId == entryData.id)
       end
@@ -1415,10 +1415,12 @@ local function CreateModernListPane()
   scrollBar:SetPoint("BOTTOMLEFT", scrollBox, "BOTTOMRIGHT", 0, 0)
   scrollBar:SetHideIfUnscrollable(false)
 
-  -- listPane.scroll is the native scrollBox so existing RefreshList
-  -- (GetDataProvider():Flush()/InsertTable()) and SelectEntry (ForEachFrame)
-  -- call sites require zero changes.
-  listPane.scroll = scrollBox
+  -- BSP-066 / Option A: Flush/InsertTable via escape hatch preserves scroll
+  -- position on filter/sort/action refreshes (SetData rebuilds the provider
+  -- and resets to top — undesirable for in-panel filter/sort interactions).
+  -- listPane.list holds the controller so Destroy() is reachable and
+  -- ForEachFrame routes through the abstraction (not a raw frame pointer).
+  listPane.list = list
   listPane.listBackend = "modern"
 end
 
