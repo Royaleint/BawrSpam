@@ -85,7 +85,6 @@ local activeSection = "Detection"
 local sizeDirty
 local embeddedMode
 local initialized
-local interfaceRegistered
 local popupsRegistered
 -- BSP-022: aceWidgets ringbuffer removed in Commit 3 (Slider/CheckBox went
 -- native then). MultiLineEditBox dialog went native in Commit 4. ConfigPanel
@@ -112,12 +111,6 @@ local function Print(message)
     DEFAULT_CHAT_FRAME:AddMessage(message)
   else
     print(message)
-  end
-end
-
-local function DevLog(message)
-  if NS.DB and NS.DB.IsDevMode and NS.DB.IsDevMode() then
-    Print(message)
   end
 end
 
@@ -1387,10 +1380,9 @@ local function RegisterStaticPopups()
 end
 
 local function RegisterInterfaceOptions()
-  if interfaceRegistered or type(CreateFrame) ~= "function" then
+  if type(CreateFrame) ~= "function" then
     return
   end
-  interfaceRegistered = true
 
   local panel = CreateFrame("Frame", "BawrSpamConfigOptionsPanel")
   panel.name = "BawrSpam"
@@ -1424,24 +1416,18 @@ local function RegisterInterfaceOptions()
     end
   end)
 
-  local settings = _G["Settings"]
-  if settings and settings.RegisterCanvasLayoutCategory and settings.RegisterAddOnCategory then
-    local ok, category = pcall(settings.RegisterCanvasLayoutCategory, panel, "BawrSpam")
-    if ok and category then
-      pcall(settings.RegisterAddOnCategory, category)
-      return
-    end
-  end
-
-  local legacy = _G["InterfaceOptions_AddCategory"]
-  if type(legacy) == "function" then
-    local ok = pcall(legacy, panel)
-    if ok then
-      return
-    end
-  end
-
-  DevLog("Interface options registration unavailable.")
+  -- FND-009 Phase E: adopt Foundry.Settings for panel registration.
+  -- Replaces the hand-rolled dual-path pcall block. Foundry handles modern
+  -- Settings.RegisterCanvasLayoutCategory + RegisterAddOnCategory and the
+  -- legacy InterfaceOptions_AddCategory fallback, with fail-loud semantics.
+  -- Duplicate-refusal is handled by Foundry's live-registry (replaces the
+  -- interfaceRegistered upvalue guard). This function is called at most once
+  -- via ConfigPanel.Initialize's `initialized` guard.
+  local F = _G.Foundry_1_0
+  ConfigPanel.settingsController = F.Settings:New({
+    title = "BawrSpam",
+    frame = panel,
+  })
 end
 
 -- BSP-008 Commit 6: shared 3-state pause-pill row for Categories and Surfaces.
