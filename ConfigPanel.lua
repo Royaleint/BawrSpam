@@ -1424,6 +1424,7 @@ local function RegisterInterfaceOptions()
   -- interfaceRegistered upvalue guard). This function is called at most once
   -- via ConfigPanel.Initialize's `initialized` guard.
   local F = _G.Foundry_1_0
+  if not (F and F.Settings) then return end
   ConfigPanel.settingsController = F.Settings:New({
     title = "BawrSpam",
     frame = panel,

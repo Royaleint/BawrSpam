@@ -8,6 +8,7 @@
   <Script file="Libs/Foundry-1.0/Modules/Lifecycle.lua"/>
   <Script file="Libs/Foundry-1.0/Modules/DB.lua"/>
   <Script file="Libs/Foundry-1.0/Modules/List.lua"/>
+  <Script file="Libs/Foundry-1.0/Modules/Settings.lua"/>
   <Script file="Libs/LibStub/LibStub.lua"/>
   <Include file="Libs/CallbackHandler-1.0/CallbackHandler-1.0.xml"/>
   <!-- AceGUI removed at BSP-022 (ConfigPanel native conversion). All widgets
