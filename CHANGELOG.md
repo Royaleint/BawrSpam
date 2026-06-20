@@ -1,5 +1,10 @@
 # BawrSpam Changelog
 
+## v1.3.0 (2026-06-20)
+
+- Mists of Pandaria Classic is now supported.
+- General stability and behind-the-scenes improvements.
+
 ## v1.2.0 (2026-06-13)
 
 - Group Finder filtering has been removed — BawrSpam now focuses on keeping your chat clean.
