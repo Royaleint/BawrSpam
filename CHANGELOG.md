@@ -1,4 +1,4 @@
-# BawrSpam Changelog
+# Sift Changelog
 
 ## v1.3.0 (2026-06-20)
 
@@ -7,14 +7,14 @@
 
 ## v1.2.0 (2026-06-13)
 
-- Group Finder filtering has been removed — BawrSpam now focuses on keeping your chat clean.
+- Group Finder filtering has been removed — Sift now focuses on keeping your chat clean.
 - General stability and behind-the-scenes improvements.
 
 ## v1.1.2 (2026-05-26)
 
 - Rebuilt the Config panel on native Blizzard widgets.
 - Set the History window to a fixed size for consistent layout.
-- Fixed the Settings panel "Open BawrSpam Config" button.
+- Fixed the Settings panel "Open Sift Config" button.
 - Fixed several History detail-pane layout issues.
 
 ## v1.1.1 (2026-05-21)

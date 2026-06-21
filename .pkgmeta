@@ -1,4 +1,4 @@
-package-as: BawrSpam
+package-as: Sift
 
 enable-nolib-creation: no
 enable-toc-creation: yes
@@ -7,7 +7,7 @@ manual-changelog:
   filename: RELEASE_NOTES.html
   markup-type: html
 
-# No `externals:` block — BawrSpam vendors its libraries directly in Libs/
+# No `externals:` block — Sift vendors its libraries directly in Libs/
 # (see .gitignore: "Libs/ is tracked … manual vendor pattern"). The packager
 # ships them as-is from the checkout rather than fetching them at build time.
 
@@ -23,7 +23,7 @@ ignore:
   - AGENTS.md
   # Drop only the agent doc; README.md (+ packager-generated CHANGELOG) ship.
   # NOTE: no inline comments on ignore entries — the packager reads them literally.
-  - BawrSpam_Dev
+  - Sift_Dev
   - CLAUDE.md
   - RELEASE_NOTES.md
   - RELEASE_NOTES.html

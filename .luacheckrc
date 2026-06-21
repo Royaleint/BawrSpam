@@ -102,7 +102,7 @@ read_globals = {
 -- Exclude vendored libraries (third-party code; not subject to project rules)
 -- and the private dev repo (its own rules + dev-only globals live there).
 exclude_files = {
-    "BawrSpam_Dev/**",
+    "Sift_Dev/**",
     "Libs/**",
 }
 

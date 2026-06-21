@@ -1,12 +1,12 @@
 # Vendored Library Attribution
 
-BawrSpam vendors a small set of WoW Lua libraries to avoid a fetch step at install time. Sources, versions, and license terms:
+Sift vendors a small set of WoW Lua libraries to avoid a fetch step at install time. Sources, versions, and license terms:
 
 ## Foundry-1.0
 
 - **Source:** https://github.com/Royaleint/Foundry.git
 - **License:** MIT
-- **Purpose:** SavedVariables layer (Foundry.DB), addon lifecycle, slash command registry, and event dispatch. BawrSpam's core dependency — replaces AceDB-3.0 (BSP-062), AceAddon-3.0 (BSP-060), and related Ace3 modules.
+- **Purpose:** SavedVariables layer (Foundry.DB), addon lifecycle, slash command registry, and event dispatch. Sift's core dependency — replaces AceDB-3.0 (BSP-062), AceAddon-3.0 (BSP-060), and related Ace3 modules.
 - **Vendored at:** BSP-064 (FND-007 embedded-copy guard; v1.0.4). Standalone Foundry-1.0 wins when installed; this embed is the fallback for distributions without a separate Foundry install.
 - **Update policy:** Re-vendor from source tag when a new Foundry release is needed. Pin the tag — do not track HEAD.
 
@@ -28,21 +28,21 @@ BawrSpam vendors a small set of WoW Lua libraries to avoid a fetch step at insta
 
 - **Source:** https://github.com/tekkub/libdatabroker-1-1
 - **License:** Public domain / unlicensed per upstream README.
-- **Purpose:** LDB data-source object that LibDBIcon-1.0 binds to. BawrSpam registers a single LDB launcher (`type = "launcher"`) for the minimap button.
+- **Purpose:** LDB data-source object that LibDBIcon-1.0 binds to. Sift registers a single LDB launcher (`type = "launcher"`) for the minimap button.
 - **Vendored at:** BSP-003 (minimap button transitive dep)
 
 ## LibDBIcon-1.0
 
 - **Source:** https://www.curseforge.com/wow/addons/libdbicon-1-0
 - **License:** All Rights Reserved per upstream `.toc` — explicit permission to use, modify, fork, and redistribute with WoW addons (standard WowAce vendoring permission)
-- **Purpose:** Minimap button registration and visibility/position management. Optional at runtime — BawrSpam falls through silently if not present (§10.3).
+- **Purpose:** Minimap button registration and visibility/position management. Optional at runtime — Sift falls through silently if not present (§10.3).
 - **Vendored at:** BSP-003 (minimap button)
 
 ## Vendoring policy
 
 - These libraries were copied verbatim from a co-located studio addon (Homestead) which had already vendored canonical WowAce releases.
 - No modifications. Spot-check on initial vendor showed no studio-specific patches.
-- Updates: re-vendor from WowAce when the upstream lib publishes a relevant fix. Track in `BawrSpam_Dev/BSpam_Tracker.md`.
+- Updates: re-vendor from WowAce when the upstream lib publishes a relevant fix. Track in `Sift_Dev/BSpam_Tracker.md`.
 
 ## Libraries removed
 

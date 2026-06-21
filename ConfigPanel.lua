@@ -2346,7 +2346,7 @@ local function BuildFPExportText(limit)
   end
 
   local lines = {
-    "-- Sift FP-export (negative fixtures for BawrSpam_Dev/patterns/fixtures.lua)",
+    "-- Sift FP-export (negative fixtures for Sift_Dev/patterns/fixtures.lua)",
     "-- Exported: " .. (date and date("%Y-%m-%d %H:%M:%S") or "?"),
     "-- Entries:  " .. tostring(#restored)
       .. (limit and (" (limited to last " .. tostring(limit) .. ")") or ""),

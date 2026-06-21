@@ -1,5 +1,5 @@
 # Private dev workspace (nested git repo, separately tracked)
-BawrSpam_Dev/
+Sift_Dev/
 
 # Local git worktrees
 .worktrees/
@@ -8,7 +8,7 @@ BawrSpam_Dev/
 .claude/
 .codex/
 
-# Agent-entry docs — canonical lives in BawrSpam_Dev/agent-entry/, hardlinked to root (STU-046)
+# Agent-entry docs — canonical lives in Sift_Dev/agent-entry/, hardlinked to root (STU-046)
 CLAUDE.md
 AGENTS.md
 

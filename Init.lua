@@ -1,7 +1,7 @@
 local ADDON_NAME, NS = ...
 
 -- Foundry-1.0 is a hard dependency (## Dependencies: Foundry-1.0), so it is loaded
--- before BawrSpam and _G.Foundry_1_0 is bound. Guard at file load (mirrors
+-- before Sift and _G.Foundry_1_0 is bound. Guard at file load (mirrors
 -- Homestead's Lifecycle bind): a nil F means Foundry failed to set its global, so
 -- the bootstrap below (which now hard-needs F.Lifecycle) fails loud with a clear
 -- message rather than an opaque nil-index at the :New call. The hard dependency
@@ -416,16 +416,16 @@ end
 -- installed the scanner. No behavior change.
 --
 -- Subscription ORDER is load-bearing: OnAddonLoaded (Initialize) must precede OnLogin
--- (InstallScanner) -- if BawrSpam were ever loaded on demand after login, both hooks
+-- (InstallScanner) -- if Sift were ever loaded on demand after login, both hooks
 -- catch up synchronously in registration order, and InstallScanner guards on
 -- `initialized`, so Initialize must run first.
 --
 -- §7.5 deliberate-exclusion set (Lifecycle adopts WHEN these run, not their contents):
 --   * NS.DB.Initialize() hard-gate (in Initialize) -- DB-readiness, not a phase; stays.
 --   * idempotency flag `initialized` -- kept (cheap consumer-owned guard).
---   * slash commands (/bawrspam, /bdev below) -- Foundry.Commands territory; not adopted.
+--   * slash commands (/sift, /bdev below) -- Foundry.Commands territory; not adopted.
 --   * Initialize() module chain + InstallScanner's ChatScanner.Install -- consumer-owned.
---   * OnLogout -- Lifecycle ships it, but BawrSpam has no logout teardown; deliberately unused.
+--   * OnLogout -- Lifecycle ships it, but Sift has no logout teardown; deliberately unused.
 local controller = F:RequireModule("Lifecycle", 1):New(NS, ADDON_NAME)
 controller:OnAddonLoaded(function() Initialize() end)
 controller:OnLogin(function() InstallScanner() end)
