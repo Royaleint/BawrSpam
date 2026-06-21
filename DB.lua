@@ -278,7 +278,13 @@ function DB.Initialize()
     return false
   end
 
-  DB.db = F.DB:New({ name = "BawrSpam", sv = "BawrSpamDB", defaults = defaults, defaultProfile = true })
+  -- One-time SavedVariables migration: BawrSpam → Hush (BSP-067)
+  if type(BawrSpamDB) == "table" and (HushDB == nil or next(HushDB) == nil) then
+    HushDB = BawrSpamDB
+    BawrSpamDB = nil
+  end
+
+  DB.db = F.DB:New({ name = "Hush", sv = "HushDB", defaults = defaults, defaultProfile = true })
   RepairShape(DB.db.global, DB.db.char)
   ApplyMigrations(DB.db)
   RepairShape(DB.db.global, DB.db.char)

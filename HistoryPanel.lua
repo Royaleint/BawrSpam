@@ -137,7 +137,7 @@ local STATS_TILE_LABELS = {
 local STATS_TILE_TOOLTIPS = {
   detected = {
     title = "Detected",
-    body  = "Lifetime count of messages BawrSpam scored as spam. " ..
+    body  = "Lifetime count of messages Hush scored as spam. " ..
             "Includes blocked, pass-thru, and restored entries.",
   },
   blocked = {
@@ -347,7 +347,7 @@ local function CreatePlainHistoryFrame(parent)
 
   header.TitleText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   header.TitleText:SetPoint("CENTER", header, "CENTER", 0, 0)
-  header.TitleText:SetText(L("BawrSpam — History"))
+  header.TitleText:SetText(L("Hush — History"))
   f.TitleContainer = header
 
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -381,9 +381,9 @@ local function CreateBackdropFrame(parent)
   end
   HidePortraitChrome(f)
   if f.SetTitle then
-    f:SetTitle(L("BawrSpam — History"))
+    f:SetTitle(L("Hush — History"))
   elseif f.TitleContainer and f.TitleContainer.TitleText then
-    f.TitleContainer.TitleText:SetText(L("BawrSpam — History"))
+    f.TitleContainer.TitleText:SetText(L("Hush — History"))
   end
   -- Center the title within TitleContainer (template default is LEFT-anchored).
   if f.TitleContainer and f.TitleContainer.TitleText then
@@ -820,7 +820,7 @@ local function ShowCopySenderPopup(entry)
 end
 
 local function BuildContextMenuItems(entry)
-  local items = { { text = "BawrSpam", isTitle = true, notCheckable = true } }
+  local items = { { text = "Hush", isTitle = true, notCheckable = true } }
 
   if ContextEntryRestorable(entry) then
     items[#items + 1] = { text = "Restore", notCheckable = true,
@@ -859,7 +859,7 @@ local function OpenRowContextMenu(anchor, entry)
 
   if MenuUtil and MenuUtil.CreateContextMenu then
     MenuUtil.CreateContextMenu(anchor, function(_, root)
-      root:CreateTitle("BawrSpam")
+      root:CreateTitle("Hush")
       if ContextEntryRestorable(entry) then
         root:CreateButton("Restore", function() PerformRestore(entry) end)
         if ContextEntryCanAllowlist(entry) then
@@ -1606,7 +1606,7 @@ local function BuildEmptyState(parent)
 
   f.subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   f.subtitle:SetPoint("CENTER", f, "CENTER", 0, 16)
-  f.subtitle:SetText("BawrSpam is watching.")
+  f.subtitle:SetText("Hush is watching.")
 
   f.stats = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   f.stats:SetPoint("CENTER", f, "CENTER", 0, -12)
@@ -2269,9 +2269,9 @@ local function RegisterMinimap()
 	local LDBIcon = LibStub and LibStub("LibDBIcon-1.0",      true)
 	if not LDB or not LDBIcon then return end
 
-  minimapLDB = LDB:NewDataObject("BawrSpam", {
+  minimapLDB = LDB:NewDataObject("Hush", {
     type  = "launcher",
-    text  = "BawrSpam",
+    text  = "Hush",
     icon  = "Interface\\Icons\\INV_Misc_Note_03",
     OnClick = function(self, button)
       if button == "RightButton" then
@@ -2288,7 +2288,7 @@ local function RegisterMinimap()
         -- Each click cycles the surface and returns MenuResponse.Refresh so the menu
         -- stays open for fast multi-cycle without re-opening.
         MenuUtil.CreateContextMenu(self, function(_, root)
-          root:CreateTitle(L("BawrSpam"))
+          root:CreateTitle(L("Hush"))
           root:CreateTitle(L("Pause surface"))
           for _, surfaceKey in ipairs(PAUSE_PILL_KEYS) do
             local labelText = SURFACE_LABELS[surfaceKey] or surfaceKey
@@ -2306,7 +2306,7 @@ local function RegisterMinimap()
       end
     end,
     OnTooltipShow = function(tooltip)
-      tooltip:AddLine("BawrSpam")
+      tooltip:AddLine("Hush")
       tooltip:AddLine("Left-click to toggle the History panel.", 1, 1, 1)
       tooltip:AddLine("Right-click for the Pause-surface menu and config.", 1, 1, 1)
     end,
@@ -2315,7 +2315,7 @@ local function RegisterMinimap()
 	local settings = GetSettings()
 	minimapOptions = minimapOptions or {}
 	minimapOptions.hide = settings.showMinimapButton == false
-	pcall(LDBIcon.Register, LDBIcon, "BawrSpam", minimapLDB, minimapOptions)
+	pcall(LDBIcon.Register, LDBIcon, "Hush", minimapLDB, minimapOptions)
 end
 
 function HistoryPanel.Initialize()
@@ -2384,7 +2384,7 @@ function HistoryPanel.RefreshMinimap()
 		RegisterMinimap()
 	end
 	if minimapOptions then
-		pcall(LDBIcon.Refresh, LDBIcon, "BawrSpam", minimapOptions)
+		pcall(LDBIcon.Refresh, LDBIcon, "Hush", minimapOptions)
 	end
 end
 
@@ -2402,9 +2402,9 @@ function HistoryPanel.SetMinimapShown(shown)
 		RegisterMinimap()
 	end
 	if value then
-		pcall(LDBIcon.Show, LDBIcon, "BawrSpam")
+		pcall(LDBIcon.Show, LDBIcon, "Hush")
 	else
-		pcall(LDBIcon.Hide, LDBIcon, "BawrSpam")
+		pcall(LDBIcon.Hide, LDBIcon, "Hush")
 	end
 	HistoryPanel.RefreshMinimap()
 end
