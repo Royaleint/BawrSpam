@@ -106,7 +106,7 @@ local listState = {
 }
 
 local function Print(message)
-  message = "|cff33ff99Hush|r " .. tostring(message)
+  message = "|cff33ff99Sift|r " .. tostring(message)
   if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
     DEFAULT_CHAT_FRAME:AddMessage(message)
   else
@@ -494,7 +494,7 @@ end
 
 local function MakeOptionsSlider(x, y, width, label, minValue, maxValue, step)
   nextSliderId = nextSliderId + 1
-  local name = "HushConfigSlider" .. nextSliderId
+  local name = "SiftConfigSlider" .. nextSliderId
   local slider = TrackNative(CreateFrame("Slider", name, content, "OptionsSliderTemplate"))
   slider:SetSize(width or 280, 17)
   slider:SetPoint("TOPLEFT", content, "TOPLEFT", x or CONTENT_PAD, y)
@@ -772,7 +772,7 @@ local function FindHistorySender(text)
     end
   end
 
-  return nil, "Hush can only manually allow players already present in History."
+  return nil, "Sift can only manually allow players already present in History."
 end
 
 local function AddAllowlistFromText(text)
@@ -1008,8 +1008,8 @@ local function ParseImportText(text)
     end
   end
 
-  if formatName ~= "Hush-allowlist" then
-    return nil, "Import format must be Hush-allowlist."
+  if formatName ~= "Sift-allowlist" then
+    return nil, "Import format must be Sift-allowlist."
   end
   if version ~= 1 then
     return nil, "Import version must be 1."
@@ -1027,7 +1027,7 @@ end
 local function ExportAllowlistText()
   local allowlist = NS.Trust and NS.Trust.GetAllowlist and NS.Trust.GetAllowlist() or {}
   local rows = {
-    "format=Hush-allowlist",
+    "format=Sift-allowlist",
     "version=1",
     "exportedAt=" .. tostring(Now()),
   }
@@ -1107,7 +1107,7 @@ local function EnsureDialog()
     return dialogFrame
   end
 
-  dialogFrame = CreateFrame("Frame", "HushConfigDialog", UIParent, "BackdropTemplate")
+  dialogFrame = CreateFrame("Frame", "SiftConfigDialog", UIParent, "BackdropTemplate")
   dialogFrame:SetSize(520, 390)
   dialogFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   dialogFrame:SetFrameStrata("DIALOG")
@@ -1244,7 +1244,7 @@ local function RegisterStaticPopups()
   popupsRegistered = true
 
   StaticPopupDialogs["HUSH_CLEAR_HISTORY"] = {
-    text = "Clear all Hush history?",
+    text = "Clear all Sift history?",
     button1 = "Clear",
     button2 = "Cancel",
     OnAccept = function()
@@ -1280,7 +1280,7 @@ local function RegisterStaticPopups()
   }
 
   StaticPopupDialogs["HUSH_RESET_SETTINGS"] = {
-    text = "Reset Hush settings to defaults?",
+    text = "Reset Sift settings to defaults?",
     button1 = "Reset",
     button2 = "Cancel",
     OnAccept = function()
@@ -1384,17 +1384,17 @@ local function RegisterInterfaceOptions()
     return
   end
 
-  local panel = CreateFrame("Frame", "HushConfigOptionsPanel")
-  panel.name = "Hush"
+  local panel = CreateFrame("Frame", "SiftConfigOptionsPanel")
+  panel.name = "Sift"
 
   local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   title:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -16)
-  title:SetText("Hush Configuration")
+  title:SetText("Sift Configuration")
 
   local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
   button:SetSize(190, 24)
   button:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -18)
-  button:SetText("Open Hush Config...")
+  button:SetText("Open Sift Config...")
   button:SetScript("OnClick", function()
     -- BSP-055 Gate 2 followup: don't try to dismiss the Settings panel
     -- from addon code. The previous pcall(SettingsPanel.Close, ...) +
@@ -1426,7 +1426,7 @@ local function RegisterInterfaceOptions()
   local F = _G.Foundry_1_0
   if not (F and F.Settings) then return end
   ConfigPanel.settingsController = F.Settings:New({
-    title = "Hush",
+    title = "Sift",
     frame = panel,
   })
 end
@@ -1638,7 +1638,7 @@ RenderSurfaces = function()
 end
 
 RenderAllowlist = function()
-  local y = AddSectionTitle("Allowlist", "Manage senders that Hush should trust.")
+  local y = AddSectionTitle("Allowlist", "Manage senders that Sift should trust.")
   y = AddStatus(y, sectionStatus.Allowlist)
 
   AddText("Search", "GameFontNormalSmall", CONTENT_PAD, y + 2, 48)
@@ -1662,7 +1662,7 @@ RenderAllowlist = function()
   local addBox = AddEditBox(CONTENT_PAD + 112, y + 5, 180, listState.allowlistAddText,
     "Add from History",
     "Enter as Name-Realm. The sender must already appear in your History \194\151 you can't " ..
-    "allowlist arbitrary names, only ones Hush has actually seen.")
+    "allowlist arbitrary names, only ones Sift has actually seen.")
   AddNativeButton("Add", CONTENT_PAD + 300, y + 6, 72, function()
     listState.allowlistAddText = addBox:GetText() or ""
     AddAllowlistFromText(listState.allowlistAddText)
@@ -1913,7 +1913,7 @@ RenderUI = function()
   y = AddCheckbox("Show minimap button", "showMinimapButton", y, function(value)
     SetSetting("showMinimapButton", value)
     SetHistoryPanelMinimapShown(value)
-  end, "Toggle the Hush launcher icon on the minimap.")
+  end, "Toggle the Sift launcher icon on the minimap.")
 
   AddNativeButton("Reset History Panel", CONTENT_PAD, y, 150, function()
     if NS.HistoryPanel and NS.HistoryPanel.ResetPosition then
@@ -1994,9 +1994,9 @@ local function HidePortraitChrome(f)
 end
 
 local function CreatePlainConfigFrame(parent)
-  local ok, f = pcall(CreateFrame, "Frame", "HushConfigFrame", parent, "BackdropTemplate")
+  local ok, f = pcall(CreateFrame, "Frame", "SiftConfigFrame", parent, "BackdropTemplate")
   if not ok or not f then
-    f = CreateFrame("Frame", "HushConfigFrame", parent)
+    f = CreateFrame("Frame", "SiftConfigFrame", parent)
   end
   if f.SetBackdrop then
     f:SetBackdrop({
@@ -2025,7 +2025,7 @@ local function CreatePlainConfigFrame(parent)
 
   header.TitleText = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   header.TitleText:SetPoint("CENTER", header, "CENTER", 0, 0)
-  header.TitleText:SetText(L("Hush \226\128\148 Config"))
+  header.TitleText:SetText(L("Sift \226\128\148 Config"))
   f.TitleContainer = header
 
   local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -2038,7 +2038,7 @@ end
 
 local function CreatePortraitConfigFrame(parent)
   local template = "PortraitFrameTemplate"
-  local ok, f = pcall(CreateFrame, "Frame", "HushConfigFrame", parent, template)
+  local ok, f = pcall(CreateFrame, "Frame", "SiftConfigFrame", parent, template)
   if ok and f then
     return f
   end
@@ -2046,7 +2046,7 @@ local function CreatePortraitConfigFrame(parent)
   -- future Retail interface revision: drop the template and let ApplyConfigChrome's
   -- method-existence guards no-op the Portrait-specific work. The frame name is
   -- preserved so UISpecialFrames + external addon-manager lookups still resolve.
-  return CreateFrame("Frame", "HushConfigFrame", parent)
+  return CreateFrame("Frame", "SiftConfigFrame", parent)
 end
 
 local function CreateConfigFrame(parent)
@@ -2070,9 +2070,9 @@ local function ApplyConfigChrome(f)
   end
   HidePortraitChrome(f)
   if f.SetTitle then
-    f:SetTitle(L("Hush \226\128\148 Config"))
+    f:SetTitle(L("Sift \226\128\148 Config"))
   elseif f.TitleContainer and f.TitleContainer.TitleText then
-    f.TitleContainer.TitleText:SetText(L("Hush \226\128\148 Config"))
+    f.TitleContainer.TitleText:SetText(L("Sift \226\128\148 Config"))
   end
   -- Center the title within TitleContainer (PortraitFrameTemplate default
   -- is LEFT-anchored; Plain path already centers, so this is a no-op there).
@@ -2110,7 +2110,7 @@ local NAV_TOOLTIPS = {
   Detection  = "Score threshold, mixed-script signal weight, anti-signal cap.",
   Categories = "Toggle each spam category between Active (block), Paused (log only), and Off (ignore).",
   Surfaces   = "Toggle each chat surface between Active, Paused, and Off. Also: filter bubbles.",
-  Allowlist  = "Senders Hush will always trust. Add from History or import a saved list.",
+  Allowlist  = "Senders Sift will always trust. Add from History or import a saved list.",
   Blocked    = "Recently blocked actors. Manage repeat offenders.",
   History    = "Retained-history limit and clear control.",
   UI         = "Minimap launcher and panel-position resets.",
@@ -2163,7 +2163,7 @@ local function BuildFrame(parent)
   if embedded then
     -- Embed mode: plain Frame, no chrome. HistoryPanel's Config tab owns
     -- the chrome; we just provide content inside its host frame.
-    frame = CreateFrame("Frame", "HushConfigFrame", parent)
+    frame = CreateFrame("Frame", "SiftConfigFrame", parent)
     frame:SetAllPoints(parent)
     embeddedMode = true
   else
@@ -2204,7 +2204,7 @@ local function BuildFrame(parent)
     ApplyStoredGeometry()
   end
   if not embedded and UISpecialFrames then
-    tinsert(UISpecialFrames, "HushConfigFrame")
+    tinsert(UISpecialFrames, "SiftConfigFrame")
   end
 end
 
@@ -2346,7 +2346,7 @@ local function BuildFPExportText(limit)
   end
 
   local lines = {
-    "-- Hush FP-export (negative fixtures for BawrSpam_Dev/patterns/fixtures.lua)",
+    "-- Sift FP-export (negative fixtures for BawrSpam_Dev/patterns/fixtures.lua)",
     "-- Exported: " .. (date and date("%Y-%m-%d %H:%M:%S") or "?"),
     "-- Entries:  " .. tostring(#restored)
       .. (limit and (" (limited to last " .. tostring(limit) .. ")") or ""),
@@ -2391,7 +2391,7 @@ function ConfigPanel.OpenFPExportDialog(limit)
   end
   if limit and count > limit then count = limit end
   ShowTextDialog(
-    "Hush FP Fixture Export (" .. tostring(count) .. " entries)",
+    "Sift FP Fixture Export (" .. tostring(count) .. " entries)",
     BuildFPExportText(limit),
     "Close", nil)
 end
@@ -2484,7 +2484,7 @@ local function BuildHistoryExportText(limit)
   end
 
   local lines = {
-    string.format("-- Hush history export: %d records, %d unique%s",
+    string.format("-- Sift history export: %d records, %d unique%s",
       totalRecords, uniqueCount,
       limit and (" (top " .. tostring(limit) .. " shown)") or ""),
     "-- Exported: " .. (date and date("%Y-%m-%d %H:%M:%S") or "?"),
@@ -2548,19 +2548,19 @@ function ConfigPanel.OpenHistoryExportDialog(limit)
   if limit and shown > limit then shown = limit end
 
   ShowTextDialog(
-    "Hush History Corpus Export (" .. tostring(shown) .. " unique)",
+    "Sift History Corpus Export (" .. tostring(shown) .. " unique)",
     BuildHistoryExportText(limit),
     "Close", nil)
 end
 
 function ConfigPanel.OpenExportDialog()
   ConfigPanel.Initialize()
-  ShowTextDialog("Hush Allowlist Export", ExportAllowlistText(), "Close", nil)
+  ShowTextDialog("Sift Allowlist Export", ExportAllowlistText(), "Close", nil)
 end
 
 function ConfigPanel.OpenImportDialog()
   ConfigPanel.Initialize()
-  ShowTextDialog("Hush Allowlist Import", "", "Import", function(text)
+  ShowTextDialog("Sift Allowlist Import", "", "Import", function(text)
     local entries, err = ParseImportText(text)
     if not entries then
       if dialogFrame and dialogFrame.status then

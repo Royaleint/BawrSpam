@@ -1,4 +1,4 @@
--- Hush/Patterns.lua
+-- Sift/Patterns.lua
 -- Hand-written decoder + Match API. Stable across pattern releases.
 
 local Patterns = {}
