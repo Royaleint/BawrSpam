@@ -128,7 +128,7 @@ local function RunSyntheticTest(message)
     2,
     "Trade",
     nil,
-    "HushTestLine",
+    "SiftTestLine",
     "Player-9999-FFFFFFFF"
   )
 

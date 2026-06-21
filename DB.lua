@@ -278,7 +278,7 @@ function DB.Initialize()
     return false
   end
 
-  -- One-time SavedVariables migration: BawrSpam → Hush (BSP-067)
+  -- One-time SavedVariables migration: BawrSpam → Sift (BSP-067)
   if type(BawrSpamDB) == "table" and (SiftDB == nil or next(SiftDB) == nil) then
     SiftDB = BawrSpamDB
     BawrSpamDB = nil
